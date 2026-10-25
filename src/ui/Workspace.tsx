@@ -4,6 +4,7 @@ import { findItem } from "../core/model/catalog";
 import { overlay, sceneApi } from "../scene/api";
 import { useProject } from "../store/project";
 import { useUI } from "../store/ui";
+import { useIssues } from "./useIssues";
 import { PartIcon } from "./PartIcon";
 
 const Scene = lazy(() => import("../scene/Scene").then((m) => ({ default: m.Scene })));
@@ -32,7 +33,11 @@ export function Workspace() {
   const { running, tab, openSheet } = useUI();
   const pending = useProject((s) => s.pending);
   const isCable = useProject((s) => s.project.cables.some((c) => c.id === s.selected));
-  const issues = useProject((s) => s.circuit.issues);
+  const issues = useIssues();
+  const beltMode = useProject((s) => s.beltMode);
+  const isBelt = useProject((s) => (s.project.belts ?? []).some((b) => b.id === s.selected));
+  const beltCross = useProject((s) => (s.project.belts ?? []).find((b) => b.id === s.selected)?.cross ?? false);
+  const toggleCross = useProject((s) => s.toggleCross);
   const top = issues[0];
   const counts = { err: issues.filter((i) => i.s === "err").length, warn: issues.filter((i) => i.s === "warn").length };
   const selected = useProject((s) => s.selected);
@@ -41,12 +46,18 @@ export function Workspace() {
   const { rotate, remove, cableMode, setCableMode } = useProject();
   const item = type ? findItem(type) : undefined;
 
-  const hint = pending
+  const hint = beltMode
+    ? beltMode.first === null
+      ? "Toca la primera polea que unirá la correa. Toca el fondo para cancelar."
+      : "Ahora toca la segunda polea. Deben quedar paralelas y en el mismo plano."
+    : pending
     ? "Toca otro borne para unirlos con un cable. Toca el fondo para cancelar."
     : running
     ? "La simulación está corriendo: la corriente se ve moverse por los cables. Toca Detener para volver al diseño."
     : tab === "simulation"
       ? "Toca Iniciar para simular el circuito y el mecanismo juntos."
+      : isBelt
+        ? "Correa seleccionada: cámbiala a cruzada para invertir el giro, o elimínala."
       : isCable
         ? cableMode === "move"
           ? "Arrastra el cable para moverlo completo, o arrastra una punta hasta un borne."
@@ -95,6 +106,15 @@ export function Workspace() {
           Simulando
         </span>
       )}
+
+      <div ref={(el) => { overlay.beltTools = el; }} hidden className="absolute top-0 left-0 z-10 flex items-center gap-2">
+        <button onClick={() => selected !== null && toggleCross(selected)} aria-pressed={beltCross} className="min-h-11 rounded-full border border-line bg-panel px-4 text-xs font-semibold shadow-lg">
+          {beltCross ? "Cruzada" : "Normal"} · cambiar
+        </button>
+        <button onClick={() => selected !== null && remove(selected)} aria-label="Eliminar correa" className="grid size-11 place-items-center rounded-full bg-err text-white shadow-lg">
+          <Trash2 className="size-5" />
+        </button>
+      </div>
 
       {top && (
         <button

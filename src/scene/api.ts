@@ -29,8 +29,9 @@ export const sceneApi: SceneApi = {
 };
 
 /** Elementos HTML que la escena mueve en cada cuadro: botones flotantes y ejes. */
-export const overlay: { partTools: HTMLElement | null; cableTools: HTMLElement | null; axes: SVGSVGElement | null } = {
+export const overlay: { partTools: HTMLElement | null; cableTools: HTMLElement | null; beltTools: HTMLElement | null; axes: SVGSVGElement | null } = {
   partTools: null,
   cableTools: null,
+  beltTools: null,
   axes: null,
 };

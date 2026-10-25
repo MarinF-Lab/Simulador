@@ -1,6 +1,6 @@
 // Historial de deshacer y rehacer basado en comandos. Puro, sin React.
 
-import type { Cable, Part, Project, PropValue } from "../model/project";
+import type { Belt, Cable, Part, Project, PropValue } from "../model/project";
 
 /** Cambios a una pieza. Una propiedad en `undefined` se borra. */
 export type Patch = Partial<Omit<Part, "id" | "props">> & { props?: Record<string, PropValue | undefined> };
@@ -12,6 +12,9 @@ export type Command =
   | { kind: "addCable"; cable: Cable }
   | { kind: "removeCable"; cable: Cable; index: number }
   | { kind: "updateCable"; id: number; before: CableShape; after: CableShape }
+  | { kind: "addBelt"; belt: Belt }
+  | { kind: "removeBelt"; belt: Belt; index: number }
+  | { kind: "updateBelt"; id: number; before: boolean; after: boolean }
   /** Varias acciones que se deshacen juntas. */
   | { kind: "batch"; cmds: Command[] };
 
@@ -58,6 +61,12 @@ export function apply(p: Project, c: Command): Project {
       return { ...p, cables: p.cables.filter((x) => x.id !== c.cable.id) };
     case "updateCable":
       return { ...p, cables: p.cables.map((x) => (x.id === c.id ? { ...x, ends: c.after.ends, bend: c.after.bend ?? null } : x)) };
+    case "addBelt":
+      return { ...p, belts: [...(p.belts ?? []), c.belt], nextId: Math.max(p.nextId, c.belt.id + 1) };
+    case "removeBelt":
+      return { ...p, belts: (p.belts ?? []).filter((x) => x.id !== c.belt.id) };
+    case "updateBelt":
+      return { ...p, belts: (p.belts ?? []).map((x) => (x.id === c.id ? { ...x, cross: c.after } : x)) };
     case "batch":
       return c.cmds.reduce(apply, p);
   }
@@ -78,6 +87,12 @@ function unapply(p: Project, c: Command): Project {
       return { ...p, cables: insertAt(p.cables, c.cable, c.index) };
     case "updateCable":
       return apply(p, { kind: "updateCable", id: c.id, before: c.after, after: c.before });
+    case "addBelt":
+      return apply(p, { kind: "removeBelt", belt: c.belt, index: -1 });
+    case "removeBelt":
+      return { ...p, belts: insertAt(p.belts ?? [], c.belt, c.index) };
+    case "updateBelt":
+      return apply(p, { kind: "updateBelt", id: c.id, before: c.after, after: c.before });
     case "batch":
       return [...c.cmds].reverse().reduce(unapply, p);
   }

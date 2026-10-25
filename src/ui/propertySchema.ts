@@ -36,14 +36,10 @@ const control: Section = {
     { type: "toggle", key: "invert", label: "Inversión de sentido", def: false },
   ],
 };
-const transmission = (def: string): Section => ({
+const transmission = (): Section => ({
   id: "transmission",
   title: "Transmisión",
-  fields: [
-    { type: "select", key: "ttype", label: "Tipo", options: ["Engranaje", "Polea y correa", "Correa cruzada", "Eje directo"], def },
-    { type: "ratio", key: "ratio", label: "Relación de transmisión", def: 3 },
-    { type: "number", key: "eff", label: "Eficiencia", unit: "%", min: 1, max: 100, def: 85 },
-  ],
+  fields: [{ type: "number", key: "eff", label: "Eficiencia", unit: "%", min: 1, max: 100, def: 85 }],
 });
 const joint: Section = {
   id: "joint",
@@ -67,7 +63,7 @@ const electric = (fields: Field[]): Section => ({ id: "elec", title: "Valores", 
 export function sectionsFor(kind: PartKind): Section[] {
   switch (kind) {
     case "dcmotor":
-      return [motor(), transmission("Engranaje"), control];
+      return [motor(), control];
     case "stepper":
       return [motor([{ type: "number", key: "steps", label: "Pasos por vuelta", min: 4, max: 1000, def: 200 }]), control];
     case "servo":
@@ -75,12 +71,12 @@ export function sectionsFor(kind: PartKind): Section[] {
     case "linear":
       return [motor([{ type: "number", key: "stroke", label: "Carrera", unit: "mm", min: 10, max: 500, def: 100 }]), control];
     case "gear":
-      return [transmission("Engranaje")];
+      return [transmission()];
     case "pulley":
     case "belt":
-      return [transmission("Polea y correa")];
+      return [transmission()];
     case "shaft":
-      return [transmission("Eje directo")];
+      return [transmission()];
     case "joint":
     case "link":
       return [joint, arm];

@@ -152,10 +152,10 @@ export function BendHandle() {
   );
 }
 
-/** Mientras corre la simulación con corriente, pide un cuadro nuevo cada vez para animar. */
+/** Mientras corre la simulación con corriente o piezas girando, pide un cuadro nuevo cada vez para animar. */
 export function FlowTicker() {
   const running = useUI((s) => s.running);
-  const any = useProject((s) => s.project.cables.some((c) => Math.abs(s.circuit.readings[c.id]?.i ?? 0) > 1e-4));
+  const any = useProject((s) => s.project.cables.some((c) => Math.abs(s.circuit.readings[c.id]?.i ?? 0) > 1e-4) || Object.values(s.mech.rpm).some((r) => Math.abs(r) > 0.5));
   const invalidate = useThree((st) => st.invalidate);
   useEffect(() => invalidate(), [running, any, invalidate]);
   useFrame(() => {

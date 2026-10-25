@@ -3,6 +3,22 @@ import { cableDiff, emptyHistory, exec, record, redo, removeCableCmd, removeCmd,
 import { analyze, type Circuit } from "../core/electrical/analyze";
 import { clampZ, findFree, newPart, placeOnTable, type Axis, type Cable, type CableEnd, type Part, type Project, type PropValue, type Vec3 } from "../core/model/project";
 import { detachFrom, endPos, posKey, reattach, termWorld } from "../core/model/terminals";
+import { snapRotor } from "../core/mechanical/snap";
+import { isRotor } from "../core/mechanical/axes";
+import { solveTrain, type Train } from "../core/mechanical/train";
+
+/** RPM de cada motor según el voltaje que recibe: RPM nominal × V / V nominal. */
+export function motorSpeeds(project: Project, circuit: Circuit): Record<number, number> {
+  const out: Record<number, number> = {};
+  for (const p of project.parts) {
+    if (p.type !== "dcmotor") continue;
+    const v = circuit.readings[p.id]?.v ?? 0;
+    const rpmN = typeof p.props.rpm === "number" ? p.props.rpm : 60;
+    const vn = typeof p.props.vnom === "number" ? p.props.vnom : 12;
+    out[p.id] = p.props.burned === true ? 0 : (rpmN * v) / vn;
+  }
+  return out;
+}
 
 export interface TermRef {
   part: number;
@@ -20,6 +36,14 @@ interface ProjectState {
   /** Borne tocado, esperando el segundo para crear un cable. */
   pending: TermRef | null;
   circuit: Circuit;
+  mech: Train;
+  /** Poniendo una correa: null = no; first = primera polea tocada. */
+  beltMode: { first: number | null } | null;
+  /** Posición de la pieza al empezar a arrastrarla (para deshacer). */
+  dragFrom: Pick<Part, "x" | "y" | "z" | "rot"> | null;
+  /** Toque en una pieza mientras se pone una correa. */
+  beltTap: (id: number) => void;
+  toggleCross: (id: number) => void;
   select: (id: number | null) => void;
   setRotAxis: (a: Axis) => void;
   run: (c: Command | null) => void;
@@ -74,10 +98,17 @@ function sample(): Project {
   const sw = P(2, "switch", -90, 130);
   const res = P(3, "resistor", 30, 130, 0, { r: 100 });
   const lamp = P(4, "lamp", 60, 10, 0, { vn: 6 });
-  const parts = [bat, sw, res, lamp,
-    P(5, "plate", 200, -40), P(6, "gear10", 160, -50, 0, {}, 6), P(7, "gear40", 210, -50, 0, {}, 6), P(8, "profile240", -60, -80)];
-  const cables = [wire(9, bat, 1, sw, 0), wire(10, sw, 1, res, 0), wire(11, res, 1, lamp, 1), wire(12, lamp, 0, bat, 0)];
-  return { parts, cables, nextId: 13 };
+  // Tren 10 → 40 con correa, movido por un motor de 12 V (como el ejemplo del prototipo).
+  const bat2 = P(13, "source", 120, 150, 0, { v: 12 });
+  const motor: Part = { id: 14, type: "dcmotor", x: 140, y: 60, z: 30, rot: [0, 0, 0], props: { rpm: 120 } };
+  const g10: Part = { id: 15, type: "gear10", x: 165, y: 60, z: 33, rot: [0, 1, 0], props: {} };
+  const g40: Part = { id: 16, type: "gear40", x: 165, y: 110, z: 3, rot: [0, 1, 0], props: {} };
+  const pS: Part = { id: 17, type: "pulleyS", x: 175, y: 110, z: 35, rot: [0, 1, 0], props: {} };
+  const pL: Part = { id: 18, type: "pulleyL", x: 175, y: 220, z: 17, rot: [0, 1, 0], props: {} };
+  const parts = [bat, sw, res, lamp, P(8, "profile240", -60, -80), bat2, motor, g10, g40, pS, pL];
+  const cables = [wire(9, bat, 1, sw, 0), wire(10, sw, 1, res, 0), wire(11, res, 1, lamp, 1), wire(12, lamp, 0, bat, 0),
+    wire(19, bat2, 1, motor, 1), wire(20, motor, 0, bat2, 0)];
+  return { parts, cables, belts: [{ id: 21, a: 17, b: 18, cross: false }], nextId: 22 };
 }
 
 export const useProject = create<ProjectState>((set, get) => {
@@ -91,6 +122,7 @@ export const useProject = create<ProjectState>((set, get) => {
   const cable = (id: number) => get().project.cables.find((c) => c.id === id);
   const setCables = (cables: Cable[]) => set({ project: { ...get().project, cables } });
   const initial = sample();
+  const initialCircuit = analyze(initial);
 
   return {
     project: initial,
@@ -99,13 +131,37 @@ export const useProject = create<ProjectState>((set, get) => {
     rotAxis: "z",
     dragging: null,
     pending: null,
-    circuit: analyze(initial),
-    select: (selected) => set({ selected, pending: null }),
+    circuit: initialCircuit,
+    mech: solveTrain(initial, motorSpeeds(initial, initialCircuit)),
+    beltMode: null,
+    dragFrom: null,
+    beltTap: (id) => {
+      const s = get();
+      const bm = s.beltMode;
+      const p = part(id);
+      if (!bm || !p || !p.type.startsWith("pulley")) return;
+      if (bm.first === null) { set({ beltMode: { first: id }, selected: id }); return; }
+      if (bm.first === id) return;
+      const belts = s.project.belts ?? [];
+      const exists = belts.some((b) => (b.a === bm.first && b.b === id) || (b.a === id && b.b === bm.first));
+      const bid = s.project.nextId;
+      if (!exists) commit({ kind: "addBelt", belt: { id: bid, a: bm.first, b: id, cross: false } });
+      set({ beltMode: null, selected: exists ? id : bid });
+    },
+    toggleCross: (id) => {
+      const b = (get().project.belts ?? []).find((x) => x.id === id);
+      if (b) commit({ kind: "updateBelt", id, before: b.cross, after: !b.cross });
+    },
+    select: (selected) => set({ selected, pending: null, beltMode: null }),
     setRotAxis: (rotAxis) => set({ rotAxis }),
     run: commit,
 
     addNear: (type, x, y) => {
       const s = get();
+      if (type === "belt") {
+        set({ beltMode: { first: null }, selected: null, pending: null });
+        return -1;
+      }
       if (type === "wire") {
         const id = s.project.nextId;
         const e = (dx: number): CableEnd => ({ att: null, x: Math.round(x + dx), y: Math.round(y), z: 0 });
@@ -129,7 +185,7 @@ export const useProject = create<ProjectState>((set, get) => {
       }
       const p = newPart(s.project, type);
       const at = placeOnTable(p, x, y);
-      set({ project: { ...s.project, parts: [...s.project.parts, { ...p, ...at }], nextId: id + 1 }, selected: id, dragging: id });
+      set({ project: { ...s.project, parts: [...s.project.parts, { ...p, ...at }], nextId: id + 1 }, selected: id, dragging: id, dragFrom: { x: at.x, y: at.y, z: 0, rot: [0, 0, 0] } });
       return id;
     },
     commitTemp: (id) => {
@@ -137,7 +193,7 @@ export const useProject = create<ProjectState>((set, get) => {
       const p = part(id);
       if (p) {
         const project = { ...s.project, cables: reattach(s.project) };
-        set({ project, history: record(s.history, { kind: "add", part: p }), dragging: null });
+        set({ project, history: record(s.history, { kind: "add", part: p }), dragging: null, dragFrom: null });
         return;
       }
       const c = cable(id);
@@ -158,19 +214,26 @@ export const useProject = create<ProjectState>((set, get) => {
       const s = get();
       const p = part(id);
       if (!p) return;
-      const at = placeOnTable(p, x, y);
-      if (at.x === p.x && at.y === p.y) return;
-      set({ project: { ...s.project, parts: s.project.parts.map((q) => (q.id === id ? { ...q, ...at } : q)) } });
+      // Engranajes y poleas: imán al eje de un motor, a otro eje o a la distancia de engrane.
+      const o = s.dragFrom ?? p;
+      const snapped = isRotor(p.type) ? snapRotor(s.project, { ...p, rot: o.rot, z: o.z }, x, y) : null;
+      const next = snapped ?? { ...placeOnTable({ ...p, rot: o.rot }, x, y), z: o.z, rot: o.rot };
+      if (next.x === p.x && next.y === p.y && next.z === p.z && next.rot.join() === p.rot.join()) return;
+      set({ project: { ...s.project, parts: s.project.parts.map((q) => (q.id === id ? { ...q, ...next } : q)) } });
     },
-    beginDrag: (id) => set({ dragging: id, selected: id, pending: null }),
-    endDrag: (id, from) => {
+    beginDrag: (id) => {
+      const p = part(id);
+      set({ dragging: id, selected: id, pending: null, dragFrom: p ? { x: p.x, y: p.y, z: p.z, rot: p.rot } : null });
+    },
+    endDrag: (id, fromXY) => {
       const s = get();
       const p = part(id);
-      set({ dragging: null });
-      if (!p || (p.x === from.x && p.y === from.y)) return;
+      const from = s.dragFrom ?? { ...fromXY, z: p?.z ?? 0, rot: p?.rot ?? [0, 0, 0] };
+      set({ dragging: null, dragFrom: null });
+      if (!p || (p.x === from.x && p.y === from.y && p.z === from.z && p.rot.join() === from.rot.join())) return;
       // Las puntas sueltas que quedaron sobre un borne se pegan a él.
       const cables = reattach(s.project);
-      const move: Command = { kind: "update", id, before: { x: from.x, y: from.y }, after: { x: p.x, y: p.y } };
+      const move: Command = { kind: "update", id, before: { x: from.x, y: from.y, z: from.z, rot: from.rot }, after: { x: p.x, y: p.y, z: p.z, rot: p.rot } };
       const extra = cableDiff(s.project.cables, cables);
       set({ project: { ...s.project, cables }, history: record(s.history, extra.length ? { kind: "batch", cmds: [move, ...extra] } : move) });
     },
@@ -202,12 +265,18 @@ export const useProject = create<ProjectState>((set, get) => {
     replace: (id) => commit(updateCmd(get().project, id, { props: { burned: undefined, burnV: undefined } })),
     remove: (id) => {
       const s = get();
-      if (isCable(s.project, id)) commit(removeCableCmd(s.project, id));
+      const belts = s.project.belts ?? [];
+      const bi = belts.findIndex((b) => b.id === id);
+      if (bi >= 0) commit({ kind: "removeBelt", belt: belts[bi]!, index: bi });
+      else if (isCable(s.project, id)) commit(removeCableCmd(s.project, id));
       else {
         const rm = removeCmd(s.project, id);
         if (!rm) return;
         const detach = cableDiff(s.project.cables, detachFrom(s.project, id));
-        commit(detach.length ? { kind: "batch", cmds: [...detach, rm] } : rm);
+        // Las correas de una polea borrada se van con ella.
+        const gone: Command[] = belts.flatMap((b, index) => (b.a === id || b.b === id ? [{ kind: "removeBelt", belt: b, index } as Command] : []));
+        const all = [...detach, ...gone.reverse(), rm];
+        commit(all.length > 1 ? { kind: "batch", cmds: all } : rm);
       }
       if (get().selected === id) set({ selected: null });
       set({ pending: null });
@@ -288,13 +357,13 @@ export const useProject = create<ProjectState>((set, get) => {
     undo: () => {
       const s = get();
       const [project, history] = undo(s.project, s.history);
-      const alive = (id: number | null) => id !== null && (project.parts.some((p) => p.id === id) || project.cables.some((c) => c.id === id));
+      const alive = (id: number | null) => id !== null && (project.parts.some((p) => p.id === id) || project.cables.some((c) => c.id === id) || (project.belts ?? []).some((b) => b.id === id));
       set({ project, history, selected: alive(s.selected) ? s.selected : null, pending: null });
     },
     redo: () => {
       const s = get();
       const [project, history] = redo(s.project, s.history);
-      const alive = (id: number | null) => id !== null && (project.parts.some((p) => p.id === id) || project.cables.some((c) => c.id === id));
+      const alive = (id: number | null) => id !== null && (project.parts.some((p) => p.id === id) || project.cables.some((c) => c.id === id) || (project.belts ?? []).some((b) => b.id === id));
       set({ project, history, selected: alive(s.selected) ? s.selected : null, pending: null });
     },
   };
@@ -315,7 +384,7 @@ useProject.subscribe((s, prev) => {
     });
     return;
   }
-  useProject.setState({ circuit: c });
+  useProject.setState({ circuit: c, mech: solveTrain(s.project, motorSpeeds(s.project, c)) });
 });
 
 /** Posición actual de una punta de cable. */

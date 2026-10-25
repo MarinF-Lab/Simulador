@@ -135,7 +135,7 @@ export function Controller() {
     invalidate();
   };
 
-  type Hit = { kind: "end"; id: number; i: 0 | 1 } | { kind: "bend"; id: number } | { kind: "term"; ref: TermRef } | { kind: "part"; id: number } | { kind: "cable"; id: number };
+  type Hit = { kind: "end"; id: number; i: 0 | 1 } | { kind: "bend"; id: number } | { kind: "term"; ref: TermRef } | { kind: "part"; id: number } | { kind: "cable"; id: number } | { kind: "belt"; id: number };
 
   /** Qué hay bajo el dedo. Prioridad: puntas de cable, bornes (si no están tapados), piezas y cables. */
   const hitAny = (cx: number, cy: number): Hit | null => {
@@ -157,6 +157,8 @@ export function Controller() {
       while (o && o.userData.partId === undefined) o = o.parent;
       if (o) return { kind: "part", id: o.userData.partId as number };
     }
+    const belt = first("belts");
+    if (belt?.object.userData.belt !== undefined && (!cab || belt.distance <= cab.distance)) return { kind: "belt", id: belt.object.userData.belt as number };
     if (cab) {
       let o: THREE.Object3D | null = cab.object;
       while (o && o.userData.cable === undefined) o = o.parent;
@@ -333,7 +335,7 @@ export function Controller() {
         const p = P().project.parts.find((q) => q.id === hit.id)!;
         drag.current = { kind: "part", ...base, id: hit.id, off: { x: p.x - g.x, y: p.y - g.y }, from: { x: p.x, y: p.y } };
       } else if (g) {
-        drag.current = { kind: "pan", ...base, p0: g, tapCable: hit?.kind === "cable" ? hit.id : null };
+        drag.current = { kind: "pan", ...base, p0: g, tapCable: hit?.kind === "cable" || hit?.kind === "belt" ? hit.id : null };
       }
     };
 
@@ -423,7 +425,9 @@ export function Controller() {
         P().endDrag(d.id, d.from);
       } else if (!cancel) {
         const now = performance.now();
-        if (lastTap.current.id === d.id && now - lastTap.current.t < 350) {
+        if (P().beltMode) {
+          P().beltTap(d.id);
+        } else if (lastTap.current.id === d.id && now - lastTap.current.t < 350) {
           lastTap.current = { id: 0, t: 0 };
           P().rotate(d.id);
         } else {
@@ -539,6 +543,9 @@ export function Controller() {
     place(overlay.partTools, sp ? [sp.x, sp.y, sp.z + extent(sp)[2]] : null, 16, -62);
     const sc = st.project.cables.find((q) => q.id === st.selected);
     place(overlay.cableTools, sc ? cableMid(st.project, sc) : null, -(overlay.cableTools?.offsetWidth ?? 160) / 2, -70);
+    const sb = (st.project.belts ?? []).find((q) => q.id === st.selected);
+    const A = sb && st.mech.axisOf[sb.a], B = sb && st.mech.axisOf[sb.b];
+    place(overlay.beltTools, A && B ? [(A.c[0] + B.c[0]) / 2, (A.c[1] + B.c[1]) / 2, (A.c[2] + B.c[2]) / 2] : null, -(overlay.beltTools?.offsetWidth ?? 160) / 2, -70);
 
     // Indicador de ejes según la cámara.
     const svg = overlay.axes;

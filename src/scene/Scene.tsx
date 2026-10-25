@@ -1,5 +1,5 @@
-import { useLayoutEffect, useMemo, useRef } from "react";
-import { Canvas } from "@react-three/fiber";
+import { useLayoutEffect, useMemo, useRef, type ReactNode } from "react";
+import { Canvas, useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { extent, TABLE, type Part } from "../core/model/project";
 import { useProject } from "../store/project";
@@ -7,6 +7,9 @@ import { Controller } from "./Controller";
 import { PartModel } from "./models";
 import { BendHandle, CableEnds, Cables, FlowTicker, Terminals } from "./Electrical";
 import { brightness } from "../core/electrical/analyze";
+import { ROTORS } from "../core/mechanical/axes";
+import { useUI } from "../store/ui";
+import { Belts } from "./Mechanical";
 
 const Q = Math.PI / 2;
 
@@ -62,13 +65,34 @@ function OutlineBox({ part, kind, pad = 6 }: { part: Part; kind: keyof typeof BO
   );
 }
 
+const reducedMotion = (() => {
+  try { return matchMedia("(prefers-reduced-motion: reduce)").matches; } catch { return false; }
+})();
+
+/** Gira el modelo sobre su eje local mientras corre la simulación. Al detenerla vuelve a su posición. */
+function Spinner({ id, axis, children }: { id: number; axis: "x" | "z"; children: ReactNode }) {
+  const ref = useRef<THREE.Group>(null);
+  const rpm = useProject((s) => s.mech.rpm[id] ?? 0);
+  const running = useUI((s) => s.running);
+  useFrame((_, dt) => {
+    const g = ref.current;
+    if (!g) return;
+    if (!running) { g.rotation.set(0, 0, 0); return; }
+    if (reducedMotion) return;
+    g.rotation[axis] += (rpm / 60) * Math.PI * 2 * Math.min(dt, 0.05);
+  });
+  return <group ref={ref}>{children}</group>;
+}
+
 function Part3D({ part }: { part: Part }) {
   const ez = extent(part)[2];
   const reading = useProject((s) => s.circuit.readings[part.id]);
   const glow = part.type === "lamp" || part.type === "led" ? brightness(part.type, part.props, reading) : 0;
+  const model = <PartModel type={part.type} glow={glow} burned={part.props.burned === true} />;
+  const rotor = ROTORS[part.type];
   return (
     <group position={[part.x, part.y, part.z + ez / 2]} rotation={[part.rot[0] * Q, part.rot[1] * Q, part.rot[2] * Q]} userData={{ partId: part.id }}>
-      <PartModel type={part.type} glow={glow} burned={part.props.burned === true} />
+      {rotor ? <Spinner id={part.id} axis={rotor.local}>{model}</Spinner> : model}
     </group>
   );
 }
@@ -95,7 +119,9 @@ export function Scene() {
   const parts = useProject((s) => s.project.parts);
   const selected = useProject((s) => s.selected);
   const sel = parts.find((p) => p.id === selected);
-  const flag = useProject((s) => s.circuit.flag);
+  const eflag = useProject((s) => s.circuit.flag);
+  const mflag = useProject((s) => s.mech.flag);
+  const flag = useMemo(() => ({ ...mflag, ...eflag }), [eflag, mflag]);
   return (
     <Canvas
       shadows
@@ -119,6 +145,7 @@ export function Scene() {
       <Cables />
       <CableEnds />
       <BendHandle />
+      <Belts />
       <FlowTicker />
       <Controller />
     </Canvas>

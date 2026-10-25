@@ -10,6 +10,8 @@ import { useProject } from "../store/project";
 import { useUI } from "../store/ui";
 import { PartIcon } from "./PartIcon";
 import { sectionsFor, type Field } from "./propertySchema";
+import { useIssues } from "./useIssues";
+import { isRotor } from "../core/mechanical/axes";
 
 const inputCls =
   "h-10 w-24 rounded-lg border border-line bg-bg px-2 text-right font-mono text-sm tabular-nums";
@@ -215,10 +217,10 @@ function IssueList({ issues }: { issues: Issue[] }) {
 
 /** Lista completa de avisos del circuito. */
 export function CircuitStatus() {
-  const issues = useProject((s) => s.circuit.issues);
+  const issues = useIssues();
   return (
     <section className="rounded-xl border border-line px-3 py-3" aria-live="polite">
-      <h3 className="pb-2 text-xs font-semibold tracking-widest text-muted uppercase">Estado del circuito</h3>
+      <h3 className="pb-2 text-xs font-semibold tracking-widest text-muted uppercase">Estado del circuito y mecanismos</h3>
       <IssueList issues={issues} />
     </section>
   );
@@ -258,7 +260,7 @@ function Readings({ id, type }: { id: number; type: string }) {
 }
 
 function ComponentStatus({ id }: { id: number }) {
-  const issues = useProject((s) => s.circuit.issues);
+  const issues = useIssues();
   const mine = issues.filter((x) => x.ids.includes(id));
   const running = useUI((s) => s.running);
   return (
@@ -273,6 +275,77 @@ function ComponentStatus({ id }: { id: number }) {
         </p>
       )}
     </section>
+  );
+}
+
+const fmtRpm = (w: number) => `${Math.round(Math.abs(w)).toLocaleString("es-CL")} RPM`;
+const turn = (w: number) => (Math.abs(w) < 0.5 ? "detenido" : w > 0 ? "↺ antihorario" : "↻ horario");
+const LINK: Record<string, string> = { motor: "eje del motor", eje: "eje compartido", engrane: "engrane", correa: "correa" };
+
+/** Giro de un engranaje, polea o eje: velocidad, sentido y relación con el motor. */
+function Motion({ id }: { id: number }) {
+  const w = useProject((s) => s.mech.rpm[id] ?? 0);
+  const ratio = useProject((s) => s.mech.ratio[id]);
+  const link = useProject((s) => s.mech.link[id]);
+  const r = ratio && Math.abs(ratio) > 1e-6 ? 1 / Math.abs(ratio) : null;
+  return (
+    <section className="rounded-xl border border-line px-3 py-2">
+      <h3 className="pb-2 text-xs font-semibold tracking-widest text-muted uppercase">Movimiento</h3>
+      <div className="grid grid-cols-3 gap-2 pb-1">
+        <Cell k="Velocidad" v={fmtRpm(w)} big />
+        <Cell k="Sentido" v={turn(w)} />
+        <Cell k="Relación" v={r ? `${fmt(r)} : 1` : "—"} />
+      </div>
+      <p className="pt-1 pb-1 text-xs text-muted">{link ? `Unido por ${LINK[link] ?? link}.` : "Suelto: no gira."} La relación compara el motor con esta pieza: 4 : 1 es 4 veces más lenta.</p>
+    </section>
+  );
+}
+
+function MotorSpeed({ id }: { id: number }) {
+  const w = useProject((s) => s.mech.rpm[id] ?? 0);
+  return (
+    <section className="rounded-xl border border-line px-3 py-2">
+      <h3 className="pb-2 text-xs font-semibold tracking-widest text-muted uppercase">Giro del eje</h3>
+      <div className="grid grid-cols-3 gap-2 pb-1">
+        <Cell k="Velocidad" v={fmtRpm(w)} big />
+        <Cell k="Sentido" v={turn(w)} />
+      </div>
+    </section>
+  );
+}
+
+function BeltPanel({ id }: { id: number }) {
+  const belt = useProject((s) => (s.project.belts ?? []).find((b) => b.id === id));
+  const mech = useProject((s) => s.mech);
+  const { remove, toggleCross } = useProject();
+  if (!belt) return null;
+  const A = mech.axisOf[belt.a], B = mech.axisOf[belt.b];
+  const ratio = A && B ? A.r / B.r : 0;
+  return (
+    <>
+      <div className="flex items-center gap-3 rounded-xl border border-line bg-panel-2/60 p-3">
+        <PartIcon kind="belt" className="size-10 text-ink/85" />
+        <div className="min-w-0 flex-1">
+          <p className="font-semibold">Correa</p>
+          <p className="text-xs text-muted">{belt.cross ? "Cruzada: invierte el giro" : "Normal: mismo sentido"}</p>
+        </div>
+        <button onClick={() => remove(id)} aria-label="Eliminar correa" className="grid size-11 place-items-center rounded-lg text-muted hover:bg-panel hover:text-err">
+          <Trash2 className="size-5" />
+        </button>
+      </div>
+      <section className="rounded-xl border border-line px-3 py-2">
+        <h3 className="pb-2 text-xs font-semibold tracking-widest text-muted uppercase">Lecturas</h3>
+        <div className="grid grid-cols-3 gap-2 pb-1">
+          <Cell k="Entrada" v={fmtRpm(mech.rpm[belt.a] ?? 0)} />
+          <Cell k="Salida" v={fmtRpm(mech.rpm[belt.b] ?? 0)} />
+          <Cell k="Relación" v={ratio ? `${fmt(1 / ratio)} : 1` : "—"} />
+        </div>
+      </section>
+      <button onClick={() => toggleCross(id)} className="min-h-11 rounded-lg border border-line px-3 text-sm font-medium hover:border-accent/60">
+        {belt.cross ? "Cambiar a correa normal" : "Cambiar a correa cruzada"}
+      </button>
+      <ComponentStatus id={id} />
+    </>
   );
 }
 
@@ -315,11 +388,13 @@ export function Properties() {
   const selected = useProject((s) => s.selected);
   const part = useProject((s) => s.project.parts.find((p) => p.id === s.selected));
   const isCable = useProject((s) => s.project.cables.some((c) => c.id === s.selected));
+  const isBelt = useProject((s) => (s.project.belts ?? []).some((b) => b.id === s.selected));
   const { remove, setProp, replace, flip } = useProject();
   const item = part ? findItem(part.type) : undefined;
 
   const body = (() => {
     if (isCable && selected !== null) return <CablePanel id={selected} />;
+    if (isBelt && selected !== null) return <BeltPanel id={selected} />;
     if (!part || !item) {
       return <p className="px-1 text-sm text-muted">Toca una pieza o un cable de la mesa para ver sus lecturas y cambiar sus propiedades. Para unir dos bornes, tócalos uno después del otro.</p>;
     }
@@ -347,6 +422,8 @@ export function Properties() {
         )}
 
         <Readings id={part.id} type={part.type} />
+        {part.type === "dcmotor" && <MotorSpeed id={part.id} />}
+        {isRotor(part.type) && <Motion id={part.id} />}
 
         {(part.type === "switch" || POLAR.has(part.type)) && (
           <div className="flex flex-wrap gap-2">

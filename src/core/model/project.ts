@@ -37,9 +37,18 @@ export interface Cable {
   bend?: Vec3 | null;
 }
 
+/** Correa entre dos poleas. Cruzada invierte el sentido de giro. */
+export interface Belt {
+  id: number;
+  a: number;
+  b: number;
+  cross: boolean;
+}
+
 export interface Project {
   parts: Part[];
   cables: Cable[];
+  belts?: Belt[];
   /** Contador compartido: piezas y cables nunca repiten id. */
   nextId: number;
 }

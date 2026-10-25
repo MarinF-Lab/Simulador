@@ -15,6 +15,16 @@ export const paletteDragging = () => active;
 
 export function startPaletteGesture(e: React.PointerEvent, type: string) {
   if (e.button > 0) return;
+  // La correa no se arrastra: se elige y después se tocan dos poleas.
+  if (type === "belt") {
+    const done = () => {
+      useProject.getState().addNear("belt", 0, 0);
+      useUI.getState().openSheet(null);
+      window.removeEventListener("pointerup", done);
+    };
+    window.addEventListener("pointerup", done);
+    return;
+  }
   const pid = e.pointerId, sx = e.clientX, sy = e.clientY, t0 = performance.now();
   const mouse = e.pointerType === "mouse";
   let state: "wait" | "drag" | "scroll" = "wait";

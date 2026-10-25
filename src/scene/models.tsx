@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, type ReactNode } from "react";
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { sizeOf } from "../core/model/project";
@@ -152,7 +152,28 @@ function Belt() {
   return <mesh geometry={geo} material={M.rubber} castShadow receiveShadow />;
 }
 
-function Model({ type }: { type: string }) {
+/** Vidrio que brilla según `glow` (0 a 1). Un material por pieza para que cada una brille distinto. */
+function GlowMesh({ glow, burned, color, base, children, ...rest }: { glow: number; burned: boolean; color: string; base: string; children: ReactNode; position?: V3; rotation?: V3 }) {
+  const m = useMemo(() => new THREE.MeshStandardMaterial({ color: base, transparent: true, opacity: 0.7, roughness: 0.15 }), [base]);
+  m.color.set(burned ? "#3a3a40" : base);
+  m.emissive.set(color);
+  m.emissiveIntensity = burned ? 0 : glow * 2.2;
+  m.opacity = burned ? 0.9 : 0.62 + glow * 0.3;
+  return (
+    <mesh material={m} castShadow {...rest}>
+      {children}
+    </mesh>
+  );
+}
+
+export interface ModelState {
+  glow?: number;
+  burned?: boolean;
+  /** Interruptor cerrado o sensor presionado. */
+  on?: boolean;
+}
+
+function Model({ type, glow = 0, burned = false, on = true }: { type: string } & ModelState) {
   switch (type) {
     case "source":
       return (
@@ -177,20 +198,23 @@ function Model({ type }: { type: string }) {
         <group>
           <Cyl r={12} h={6} m={M.dark} />
           <Cyl r={7} h={10} p={[0, 0, 6]} m={M.steel} />
-          <mesh position={[0, 0, 30]} material={M.glass} castShadow>
+          <GlowMesh position={[0, 0, 30]} glow={glow} burned={burned} color="#ffc65a" base="#f4e9c8">
             <sphereGeometry args={[14, 24, 16]} />
-          </mesh>
+          </GlowMesh>
         </group>
       );
     case "led":
       return (
         <group>
-          <Cyl r={0.6} h={12} p={[-3, 0, 0]} m={M.steel} seg={6} />
-          <Cyl r={0.6} h={12} p={[3, 0, 0]} m={M.steel} seg={6} />
-          <Cyl r={5} h={6} p={[0, 0, 10]} m={M.led} />
-          <mesh position={[0, 0, 16]} material={M.led}>
+          <Box s={[16, 1.2, 1.2]} p={[0, 0, 0]} m={M.steel} />
+          <Cyl r={0.6} h={10} p={[-3, 0, 0]} m={M.steel} seg={6} />
+          <Cyl r={0.6} h={10} p={[3, 0, 0]} m={M.steel} seg={6} />
+          <GlowMesh position={[0, 0, 13]} rotation={[Math.PI / 2, 0, 0]} glow={glow} burned={burned} color="#ff3030" base="#ff6a6a">
+            <cylinderGeometry args={[5, 5, 6, 20]} />
+          </GlowMesh>
+          <GlowMesh position={[0, 0, 16]} glow={glow} burned={burned} color="#ff3030" base="#ff6a6a">
             <sphereGeometry args={[5, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2]} />
-          </mesh>
+          </GlowMesh>
         </group>
       );
     case "switch":
@@ -198,7 +222,8 @@ function Model({ type }: { type: string }) {
         <group>
           <Box s={[40, 20, 10]} m={M.dark} />
           <Box s={[16, 12, 4]} p={[0, 0, 10]} m={M.black} />
-          <mesh position={[3, 0, 16]} rotation={[0, 0.5, 0]} material={M.red} castShadow>
+          {/* Palanca: inclinada hacia el lado que cierra o abre el contacto. */}
+          <mesh position={[on ? 3 : -3, 0, 16]} rotation={[0, on ? 0.5 : -0.5, 0]} material={on ? M.red : M.white} castShadow>
             <boxGeometry args={[4, 6, 12]} />
           </mesh>
         </group>
@@ -331,7 +356,7 @@ function Model({ type }: { type: string }) {
       return (
         <group>
           <Box s={[20, 20, 8]} m={M.pcb} />
-          {type === "sensorAngle" ? <Cyl r={6} h={6} p={[0, 0, 8]} m={M.white} /> : <Box s={[10, 8, 6]} p={[0, 0, 8]} m={M.red} />}
+          {type === "sensorAngle" ? <Cyl r={6} h={6} p={[0, 0, 8]} m={M.white} /> : <Box s={[10, 8, on ? 2 : 6]} p={[0, 0, 8]} m={M.red} />}
         </group>
       );
     case "meter":
@@ -356,11 +381,11 @@ function Model({ type }: { type: string }) {
 }
 
 /** Modelo centrado en su caja: el contenedor lo puede girar sobre su centro. */
-export function PartModel({ type }: { type: string }) {
+export function PartModel({ type, glow, burned, on }: { type: string } & ModelState) {
   const h = sizeOf(type)[2];
   return (
     <group position={[0, 0, -h / 2]}>
-      <Model type={type} />
+      <Model type={type} glow={glow} burned={burned} on={on} />
     </group>
   );
 }

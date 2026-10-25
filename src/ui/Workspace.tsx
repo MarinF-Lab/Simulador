@@ -1,9 +1,10 @@
 import { lazy, Suspense } from "react";
-import { Box, Info, Maximize, Minus, Plus, RotateCcw, RotateCw } from "lucide-react";
+import { Box, Hand, Info, Maximize, Minus, Move, Plus, Power, RotateCcw, RotateCw, Spline, Trash2 } from "lucide-react";
 import { findItem } from "../core/model/catalog";
 import { overlay, sceneApi } from "../scene/api";
 import { useProject } from "../store/project";
 import { useUI } from "../store/ui";
+import { useIssues } from "./useIssues";
 import { PartIcon } from "./PartIcon";
 
 const Scene = lazy(() => import("../scene/Scene").then((m) => ({ default: m.Scene })));
@@ -29,19 +30,48 @@ function Axes() {
 const viewBtn = "grid size-11 place-items-center rounded-lg border border-line bg-panel/95 text-ink hover:border-accent/60";
 
 export function Workspace() {
-  const { running, tab } = useUI();
+  const { running, tab, openSheet } = useUI();
+  const pending = useProject((s) => s.pending);
+  const isCable = useProject((s) => s.project.cables.some((c) => c.id === s.selected));
+  const issues = useIssues();
+  const beltMode = useProject((s) => s.beltMode);
+  const isBelt = useProject((s) => (s.project.belts ?? []).some((b) => b.id === s.selected));
+  const beltCross = useProject((s) => (s.project.belts ?? []).find((b) => b.id === s.selected)?.cross ?? false);
+  const toggleCross = useProject((s) => s.toggleCross);
+  const top = issues[0];
+  const counts = { err: issues.filter((i) => i.s === "err").length, warn: issues.filter((i) => i.s === "warn").length };
   const selected = useProject((s) => s.selected);
   const count = useProject((s) => s.project.parts.length);
   const type = useProject((s) => s.project.parts.find((p) => p.id === s.selected)?.type);
-  const rotate = useProject((s) => s.rotate);
+  const { rotate, remove, cableMode, setCableMode, actuate } = useProject();
+  const selProps = useProject((s) => s.project.parts.find((p) => p.id === s.selected)?.props);
+  const act = type === "switch"
+    ? { label: selProps?.closed === false ? "Cerrar" : "Abrir", on: selProps?.closed !== false, Icon: Power }
+    : type === "sensorContact"
+      ? { label: selProps?.pressed === true ? "Soltar" : "Presionar", on: selProps?.pressed === true, Icon: Hand }
+      : null;
   const item = type ? findItem(type) : undefined;
 
-  const hint = running
-    ? "La simulación está corriendo. Toca Detener para volver a la posición de diseño."
+  const hint = beltMode
+    ? beltMode.first === null
+      ? "Toca la primera polea que unirá la correa. Toca el fondo para cancelar."
+      : "Ahora toca la segunda polea. Deben quedar paralelas y en el mismo plano."
+    : pending
+    ? "Toca otro borne para unirlos con un cable. Toca el fondo para cancelar."
+    : running
+    ? "La simulación está corriendo: la corriente se ve moverse por los cables. Toca Detener para volver al diseño."
     : tab === "simulation"
       ? "Toca Iniciar para simular el circuito y el mecanismo juntos."
+      : isBelt
+        ? "Correa seleccionada: cámbiala a cruzada para invertir el giro, o elimínala."
+      : isCable
+        ? cableMode === "move"
+          ? "Arrastra el cable para moverlo completo, o arrastra una punta hasta un borne."
+          : "Arrastra el punto blanco para doblar el cable. Tócalo dos veces para dejarlo recto."
+      : act
+        ? `Toca ${act.label} para accionar ${type === "switch" ? "el interruptor" : "el sensor"}. Arrástralo para moverlo o toca un borne para empezar un cable.`
       : item
-        ? `Arrastra ${item.name.toLowerCase()} para moverlo. Toca dos veces o usa ⟳ para girarlo 90°.`
+        ? `Arrastra ${item.name.toLowerCase()} para moverlo. Toca dos veces o usa ⟳ para girarlo 90°. Toca un borne para empezar un cable.`
         : "Mueve la mesa con un dedo. Con dos dedos: pellizca para acercar, gira para orbitar y sube o baja para inclinar.";
 
   return (
@@ -50,21 +80,69 @@ export function Workspace() {
         <Scene />
       </Suspense>
 
-      <button
-        ref={(el) => { overlay.rotBtn = el; }}
-        hidden
-        onClick={() => selected !== null && rotate(selected)}
-        aria-label="Girar 90°"
-        className="absolute top-0 left-0 grid size-11 place-items-center rounded-full bg-accent text-accent-ink shadow-lg"
-      >
-        <RotateCw className="size-5" />
-      </button>
+      <div ref={(el) => { overlay.partTools = el; }} hidden className="absolute top-0 left-0 z-10 flex gap-2">
+        {act && (
+          <button
+            onClick={() => selected !== null && actuate(selected)}
+            aria-pressed={act.on}
+            className={"flex min-h-11 items-center gap-1.5 rounded-full px-4 text-sm font-semibold shadow-lg " + (act.on ? "bg-ok text-white" : "border border-line bg-panel text-ink")}
+          >
+            <act.Icon className="size-4" aria-hidden="true" /> {act.label}
+          </button>
+        )}
+        <button onClick={() => selected !== null && rotate(selected)} aria-label="Girar 90°" className="grid size-11 place-items-center rounded-full bg-accent text-accent-ink shadow-lg">
+          <RotateCw className="size-5" />
+        </button>
+        <button onClick={() => selected !== null && remove(selected)} aria-label="Eliminar pieza" className="grid size-11 place-items-center rounded-full bg-err text-white shadow-lg">
+          <Trash2 className="size-5" />
+        </button>
+      </div>
+
+      <div ref={(el) => { overlay.cableTools = el; }} hidden className="absolute top-0 left-0 z-10 flex items-center gap-2">
+        <div role="radiogroup" aria-label="Al arrastrar el cable" className="flex rounded-full border border-line bg-panel p-1 shadow-lg">
+          {([["move", "Mover", Move], ["bend", "Doblar", Spline]] as const).map(([m, label, Icon]) => (
+            <button
+              key={m}
+              role="radio"
+              aria-checked={cableMode === m}
+              onClick={() => setCableMode(m)}
+              className={"flex min-h-9 items-center gap-1.5 rounded-full px-3 text-xs font-semibold " + (cableMode === m ? "bg-accent text-accent-ink" : "text-muted")}
+            >
+              <Icon className="size-4" aria-hidden="true" /> {label}
+            </button>
+          ))}
+        </div>
+        <button onClick={() => selected !== null && remove(selected)} aria-label="Eliminar cable" className="grid size-11 place-items-center rounded-full bg-err text-white shadow-lg">
+          <Trash2 className="size-5" />
+        </button>
+      </div>
 
       {running && (
-        <span className="pointer-events-none absolute top-3 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full border border-ok/40 bg-panel px-3 py-1 text-xs font-medium text-ok">
+        <span className="pointer-events-none absolute top-14 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full border border-ok/40 bg-panel px-3 py-1 text-xs font-medium text-ok">
           <span className="size-2 rounded-full bg-ok motion-safe:animate-pulse" aria-hidden="true" />
           Simulando
         </span>
+      )}
+
+      <div ref={(el) => { overlay.beltTools = el; }} hidden className="absolute top-0 left-0 z-10 flex items-center gap-2">
+        <button onClick={() => selected !== null && toggleCross(selected)} aria-pressed={beltCross} className="min-h-11 rounded-full border border-line bg-panel px-4 text-xs font-semibold shadow-lg">
+          {beltCross ? "Cruzada" : "Normal"} · cambiar
+        </button>
+        <button onClick={() => selected !== null && remove(selected)} aria-label="Eliminar correa" className="grid size-11 place-items-center rounded-full bg-err text-white shadow-lg">
+          <Trash2 className="size-5" />
+        </button>
+      </div>
+
+      {top && (
+        <button
+          onClick={() => openSheet("properties")}
+          className="absolute top-3 left-3 flex max-w-[calc(100%-84px)] items-center gap-2 rounded-full border border-line bg-panel/95 px-3 py-2 text-xs font-medium lg:pointer-events-none"
+          aria-label={`Estado del circuito: ${top.h}`}
+        >
+          <span className={"size-2.5 shrink-0 rounded-full " + (counts.err ? "bg-err" : counts.warn ? "bg-warn" : top.s === "ok" ? "bg-ok" : "bg-muted")} aria-hidden="true" />
+          <span className="truncate">{top.h}</span>
+          {counts.err + counts.warn > 1 && <span className="shrink-0 font-mono text-muted">+{counts.err + counts.warn - 1}</span>}
+        </button>
       )}
 
       <div role="group" aria-label="Vista" className="absolute top-3 right-3 flex flex-col gap-2">

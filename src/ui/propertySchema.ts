@@ -5,6 +5,7 @@ export type Field =
   | { type: "volt"; key: string; label: string; min: number; max: number; def: number; presets: number[] }
   | { type: "slider"; key: string; label: string; unit: string; min: number; max: number; def: number }
   | { type: "select"; key: string; label: string; options: string[]; def: string }
+  | { type: "choices"; key: string; label: string; values: number[]; unit: string; def: number }
   | { type: "toggle"; key: string; label: string; def: boolean }
   | { type: "ratio"; key: string; label: string; def: number }
   | { type: "text"; key: string; label: string; def: string }
@@ -35,14 +36,10 @@ const control: Section = {
     { type: "toggle", key: "invert", label: "Inversión de sentido", def: false },
   ],
 };
-const transmission = (def: string): Section => ({
+const transmission = (): Section => ({
   id: "transmission",
   title: "Transmisión",
-  fields: [
-    { type: "select", key: "ttype", label: "Tipo", options: ["Engranaje", "Polea y correa", "Correa cruzada", "Eje directo"], def },
-    { type: "ratio", key: "ratio", label: "Relación de transmisión", def: 3 },
-    { type: "number", key: "eff", label: "Eficiencia", unit: "%", min: 1, max: 100, def: 85 },
-  ],
+  fields: [{ type: "number", key: "eff", label: "Eficiencia", unit: "%", min: 1, max: 100, def: 85 }],
 });
 const joint: Section = {
   id: "joint",
@@ -61,22 +58,12 @@ const arm: Section = {
     { type: "slider", key: "t2", label: "θ2 · codo", unit: "°", min: -90, max: 90, def: -35 },
   ],
 };
-const circuit: Section = {
-  id: "circuit",
-  title: "Circuito eléctrico",
-  fields: [
-    { type: "reading", label: "Estado", value: "Sin simular" },
-    { type: "reading", label: "Voltaje", value: "— V" },
-    { type: "reading", label: "Corriente", value: "— A" },
-    { type: "reading", label: "Componentes activos", value: "—" },
-  ],
-};
 const electric = (fields: Field[]): Section => ({ id: "elec", title: "Valores", fields });
 
 export function sectionsFor(kind: PartKind): Section[] {
   switch (kind) {
     case "dcmotor":
-      return [motor(), transmission("Engranaje"), control];
+      return [motor(), control];
     case "stepper":
       return [motor([{ type: "number", key: "steps", label: "Pasos por vuelta", min: 4, max: 1000, def: 200 }]), control];
     case "servo":
@@ -84,30 +71,30 @@ export function sectionsFor(kind: PartKind): Section[] {
     case "linear":
       return [motor([{ type: "number", key: "stroke", label: "Carrera", unit: "mm", min: 10, max: 500, def: 100 }]), control];
     case "gear":
-      return [transmission("Engranaje")];
+      return [transmission()];
     case "pulley":
     case "belt":
-      return [transmission("Polea y correa")];
+      return [transmission()];
     case "shaft":
-      return [transmission("Eje directo")];
+      return [transmission()];
     case "joint":
     case "link":
       return [joint, arm];
     case "source":
-      return [electric([{ type: "volt", key: "v", label: "Voltaje de la pila", min: 0.5, max: 24, def: 9, presets: [1.5, 3.7, 9, 12] }]), circuit];
+      return [electric([{ type: "volt", key: "v", label: "Voltaje de la pila", min: 0.5, max: 24, def: 9, presets: [1.5, 3.7, 9, 12] }])];
     case "resistor":
-      return [electric([{ type: "select", key: "r", label: "Resistencia", options: ["10 Ω", "100 Ω", "470 Ω", "1 kΩ"], def: "100 Ω" }]), circuit];
+      return [electric([{ type: "choices", key: "r", label: "Resistencia", values: [10, 100, 470, 1000], unit: "Ω", def: 100 }])];
     case "lamp":
-      return [electric([{ type: "volt", key: "vn", label: "Voltaje que soporta", min: 1.5, max: 24, def: 6, presets: [3, 6, 12] }]), circuit];
+      return [electric([{ type: "volt", key: "vn", label: "Voltaje que soporta", min: 1.5, max: 24, def: 6, presets: [3, 6, 12] }])];
     case "led":
-      return [electric([{ type: "volt", key: "vf", label: "Voltaje de encendido", min: 1.5, max: 3.5, def: 2, presets: [1.8, 2, 3] }]), circuit];
+      return [electric([{ type: "volt", key: "vf", label: "Voltaje de encendido", min: 1.5, max: 3.5, def: 2, presets: [1.8, 2, 3] }])];
     case "switch":
-      return [electric([{ type: "toggle", key: "closed", label: "Cerrado", def: true }]), circuit];
+      return [];
     case "hbridge":
-      return [electric([{ type: "select", key: "dir", label: "Sentido", options: ["Adelante", "Atrás", "Freno"], def: "Adelante" }]), circuit];
+      return [electric([{ type: "select", key: "dir", label: "Sentido", options: ["Adelante", "Atrás", "Freno"], def: "Adelante" }])];
     case "wire":
     case "meter":
-      return [circuit];
+      return [];
     case "sensor":
       return [{ id: "sensor", title: "Lectura", fields: [{ type: "reading", label: "Valor", value: "—" }] }];
     case "text":

@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
-import { X } from "lucide-react";
+import { ChevronDown, ChevronUp, RotateCw, Trash2 } from "lucide-react";
 import { findItem } from "../core/model/catalog";
 import { fmt, parseDecimal } from "../core/model/units";
-import { useUI, type PropValue } from "../store/ui";
+import { extent, type Axis, type PropValue } from "../core/model/project";
+import { useProject } from "../store/project";
+import { useUI } from "../store/ui";
 import { PartIcon } from "./PartIcon";
 import { sectionsFor, type Field } from "./propertySchema";
 
@@ -38,9 +40,9 @@ function NumberInput({ id, value, min, max, onChange, label }: { id: string; val
   );
 }
 
-function FieldRow({ partId, field }: { partId: string; field: Field }) {
-  const stored = useUI((s) => s.values[partId]);
-  const setValue = useUI((s) => s.setValue);
+function FieldRow({ partId, field }: { partId: number; field: Field }) {
+  const stored = useProject((s) => s.project.parts.find((p) => p.id === partId)?.props);
+  const setProp = useProject((s) => s.setProp);
   if (field.type === "reading") {
     return (
       <div className="flex min-h-10 items-center justify-between gap-3 text-sm">
@@ -50,7 +52,7 @@ function FieldRow({ partId, field }: { partId: string; field: Field }) {
     );
   }
   const v: PropValue = stored?.[field.key] ?? field.def;
-  const set = (nv: PropValue) => setValue(partId, field.key, nv);
+  const set = (nv: PropValue) => setProp(partId, field.key, nv);
   const id = `f-${partId}-${field.key}`;
 
   switch (field.type) {
@@ -135,14 +137,57 @@ function FieldRow({ partId, field }: { partId: string; field: Field }) {
   }
 }
 
-export function Properties() {
-  const selected = useUI((s) => s.selected);
-  const running = useUI((s) => s.running);
-  const select = useUI((s) => s.select);
-  const item = selected ? findItem(selected) : undefined;
+const sq = "grid size-10 place-items-center rounded-lg border border-line hover:border-accent/60 disabled:opacity-40";
 
-  if (!item) {
-    return <p className="px-4 py-6 text-sm text-muted">Toca una pieza de la biblioteca para ver sus propiedades.</p>;
+function Placement({ id }: { id: number }) {
+  const part = useProject((s) => s.project.parts.find((p) => p.id === id));
+  const { setZ, rotate, rotAxis, setRotAxis } = useProject();
+  if (!part) return null;
+  const [ex, ey, ez] = extent(part);
+  return (
+    <section className="rounded-xl border border-line px-3 py-2">
+      <h3 className="pb-1 text-xs font-semibold tracking-widest text-muted uppercase">Posición</h3>
+      <div className="flex flex-col divide-y divide-line/60 text-sm">
+        <div className="flex min-h-10 items-center justify-between">
+          <span className="text-muted">X · Y</span>
+          <span className="font-mono tabular-nums">{fmt(part.x)} · {fmt(part.y)} mm</span>
+        </div>
+        <div className="flex min-h-11 items-center justify-between gap-3">
+          <span>Altura (Z)</span>
+          <span className="flex items-center gap-2">
+            <button className={sq} onClick={() => setZ(id, part.z - 10)} disabled={part.z <= 0} aria-label="Bajar 10 mm"><ChevronDown className="size-5" /></button>
+            <span className="w-16 text-center font-mono tabular-nums">{fmt(part.z)} mm</span>
+            <button className={sq} onClick={() => setZ(id, part.z + 10)} aria-label="Subir 10 mm"><ChevronUp className="size-5" /></button>
+          </span>
+        </div>
+        <div className="flex min-h-11 items-center justify-between gap-3">
+          <span>Girar 90° sobre</span>
+          <span className="flex items-center gap-1.5">
+            {(["x", "y", "z"] as Axis[]).map((a) => (
+              <button key={a} onClick={() => setRotAxis(a)} aria-pressed={rotAxis === a} className={"size-10 rounded-lg border font-mono text-sm uppercase " + (rotAxis === a ? "border-accent bg-accent text-accent-ink" : "border-line")}>
+                {a}
+              </button>
+            ))}
+            <button className={sq + " ml-1"} onClick={() => rotate(id)} aria-label={`Girar 90° sobre ${rotAxis.toUpperCase()}`}><RotateCw className="size-5" /></button>
+          </span>
+        </div>
+        <div className="flex min-h-10 items-center justify-between">
+          <span className="text-muted">Tamaño</span>
+          <span className="font-mono tabular-nums">{ex} × {ey} × {ez} mm</span>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+export function Properties() {
+  const part = useProject((s) => s.project.parts.find((p) => p.id === s.selected));
+  const remove = useProject((s) => s.remove);
+  const running = useUI((s) => s.running);
+  const item = part ? findItem(part.type) : undefined;
+
+  if (!part || !item) {
+    return <p className="px-4 py-6 text-sm text-muted">Toca una pieza de la mesa para ver y cambiar sus propiedades.</p>;
   }
   const sections = sectionsFor(item.kind);
 
@@ -152,18 +197,20 @@ export function Properties() {
         <PartIcon kind={item.kind} className="size-10 text-ink/85" />
         <div className="min-w-0 flex-1">
           <p className="font-semibold">{item.name}</p>
-          {item.variant && <p className="text-xs text-muted">{item.variant}</p>}
+          <p className="text-xs text-muted">{item.variant ? `${item.variant} · ` : ""}Pieza n.º {part.id}</p>
         </div>
-        <button onClick={() => select(null)} aria-label="Quitar selección" className="grid size-11 place-items-center rounded-lg text-muted hover:bg-panel hover:text-ink">
-          <X className="size-5" />
+        <button onClick={() => remove(part.id)} aria-label="Eliminar pieza" title="Eliminar (Supr)" className="grid size-11 place-items-center rounded-lg text-muted hover:bg-panel hover:text-err">
+          <Trash2 className="size-5" />
         </button>
       </div>
+
+      <Placement id={part.id} />
 
       {sections.map((sec) => (
         <section key={sec.id} className="rounded-xl border border-line px-3 py-2">
           <h3 className="pb-1 text-xs font-semibold tracking-widest text-muted uppercase">{sec.title}</h3>
           <div className="flex flex-col divide-y divide-line/60">
-            {sec.fields.map((f, i) => <FieldRow key={f.type === "reading" ? i : f.key} partId={item.id} field={f} />)}
+            {sec.fields.map((f, i) => <FieldRow key={f.type === "reading" ? i : f.key} partId={part.id} field={f} />)}
           </div>
         </section>
       ))}

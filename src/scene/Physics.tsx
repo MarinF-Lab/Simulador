@@ -47,8 +47,10 @@ export function PhysicsRunner() {
       sim.current?.free();
       sim.current = null;
       simPoses.map = new Map();
+      simPoses.ext = new Map();
       simPoses.follow.clear();
       useSim.setState({ status: null, loading: false });
+      useProject.getState().setPressed({});
       invalidate();
     };
   }, [invalidate]);
@@ -56,12 +58,18 @@ export function PhysicsRunner() {
   useFrame((_, dt) => {
     const s = sim.current;
     if (!s) return;
+    const st = useProject.getState();
     const volt = (id: number) => useProject.getState().circuit.readings[id]?.v ?? 0;
-    s.step(dt, volt);
+    const props = (id: number) => st.project.parts.find((p) => p.id === id)?.props ?? {};
+    s.step(dt, { voltage: volt, props });
     simPoses.map = s.poses();
+    simPoses.ext = s.extensions();
     since.current += dt;
     if (since.current > 0.25) {
-      useSim.getState().setStatus(s.status(volt, since.current));
+      const status = s.status(volt, since.current);
+      useSim.getState().setStatus(status);
+      // Los sensores de contacto que una pieza toca cierran su circuito (sin tocar el historial).
+      useProject.getState().setPressed(status.pressed);
       since.current = 0;
     }
     invalidate();

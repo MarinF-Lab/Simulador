@@ -2,7 +2,14 @@ import { create } from "zustand";
 import type { Pose, SimStatus } from "../physics/world";
 
 /** Poses de la simulación: se leen en cada cuadro, sin pasar por React. */
-export const simPoses: { map: Map<number, Pose>; follow: Map<number, { holder: number; offset: [number, number, number] }>; start: Map<number, [number, number, number]> } = {
+export const simPoses: {
+  map: Map<number, Pose>;
+  follow: Map<number, { holder: number; offset: [number, number, number] }>;
+  start: Map<number, [number, number, number]>;
+  /** Salida del vástago de cada actuador lineal (mm). */
+  ext: Map<number, number>;
+} = {
+  ext: new Map(),
   map: new Map(),
   follow: new Map(),
   start: new Map(),

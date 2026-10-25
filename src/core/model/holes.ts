@@ -77,8 +77,13 @@ function localHoles(part: Pick<Part, "type" | "props">): LocalHole[] {
         { p: [0, 0, h / 2], n: [0, 0, 1], shaft: true },
       ];
       break;
+    // Servo: agujeros de su pestaña y el brazo (horn) arriba, que gira al ángulo pedido.
     case "servo":
-      out = through([[-24, 0], [24, 0]], h).filter((x) => x.n[2] < 0);
+      out = [...through([[-24, 0], [24, 0]], h).filter((x) => x.n[2] < 0), { p: [10, 0, h / 2], n: [0, 0, 1], shaft: true }];
+      break;
+    // Actuador lineal: la punta del vástago empuja o tira de lo que se monte ahí.
+    case "linear":
+      out = [{ p: [lx / 2, 0, 0], n: [1, 0, 0], shaft: true }];
       break;
   }
   cache.set(key, out);

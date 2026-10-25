@@ -8,7 +8,7 @@ describe("ejemplo inicial", () => {
     const r = s.mech.rpm;
     expect(Math.abs(r[15]!)).toBeGreaterThan(29);
     expect(r[17]! / r[15]!).toBeCloseTo(-0.25);
-    expect(s.project.joints).toHaveLength(2);
+    expect(s.project.joints).toHaveLength(5);
     expect(s.structure.issues).toEqual([]);
     expect(s.mech.issues.filter((i) => i.s === "err" || i.s === "warn")).toEqual([]);
   });
@@ -16,8 +16,8 @@ describe("ejemplo inicial", () => {
   it("borrar una pieza borra sus juntas y deshacer las devuelve", () => {
     const st = useProject.getState();
     st.remove(18);
-    expect(useProject.getState().project.joints).toHaveLength(0);
+    expect(useProject.getState().project.joints).toHaveLength(3);
     useProject.getState().undo();
-    expect(useProject.getState().project.joints).toHaveLength(2);
+    expect(useProject.getState().project.joints).toHaveLength(5);
   });
 });

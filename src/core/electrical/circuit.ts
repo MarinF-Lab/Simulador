@@ -10,7 +10,10 @@ export const GL = 0.1; // S, LED encendido (10 Ω)
 export const GMIN = 1e-9; // S, en cada nodo
 export const GMETER = 1e-7; // S, voltímetro
 
-export type ElemKind = "bat" | "res" | "sw" | "bulb" | "motor" | "led" | "meter";
+export type ElemKind = "bat" | "res" | "sw" | "bulb" | "motor" | "led" | "meter" | "src";
+
+/** Resistencia interna de la salida del puente H. */
+export const RSRC = 0.2;
 
 export interface Elem {
   id: number;
@@ -26,6 +29,10 @@ export interface Elem {
   closed?: boolean;
   burned?: boolean;
   burnV?: number;
+  /** Fuente controlada (puente H): salida = gain · (V(cb) − V(ca)). */
+  gain?: number;
+  ca?: number;
+  cb?: number;
 }
 
 export interface Wire {
@@ -63,8 +70,10 @@ export function simulate(nodes: number, elems: Elem[], wires: Wire[]): SimResult
   const isBurned = (e: Elem) => e.burned === true || burned.has(e.id);
   const on = new Map<number, boolean>();
   let R: Record<number, Reading> = {};
+  // Voltaje de salida de cada fuente controlada: se ajusta en cada pasada hasta que se estabiliza.
+  const srcV = new Map<number, number>();
 
-  for (let pass = 0; pass < 12; pass++) {
+  for (let pass = 0; pass < 16; pass++) {
     const G = Array.from({ length: nodes }, () => new Float64Array(nodes));
     const I = new Float64Array(nodes);
     for (let i = 0; i < nodes; i++) G[i]![i]! += GMIN;
@@ -73,11 +82,12 @@ export function simulate(nodes: number, elems: Elem[], wires: Wire[]): SimResult
     };
     for (const e of elems) {
       if (e.a === e.b) continue;
-      if (e.kind === "bat") {
-        const v = e.v ?? 9;
-        stamp(e.a, e.b, 1 / RINT);
-        I[e.b]! += v / RINT;
-        I[e.a]! -= v / RINT;
+      if (e.kind === "bat" || e.kind === "src") {
+        const v = e.kind === "bat" ? (e.v ?? 9) : (srcV.get(e.id) ?? 0);
+        const r = e.kind === "bat" ? RINT : RSRC;
+        stamp(e.a, e.b, 1 / r);
+        I[e.b]! += v / r;
+        I[e.a]! -= v / r;
       } else if (e.kind === "led") {
         if (on.get(e.id) && !isBurned(e)) {
           const vf = e.vf ?? 2;
@@ -98,6 +108,7 @@ export function simulate(nodes: number, elems: Elem[], wires: Wire[]): SimResult
       const vd = V[e.b]! - V[e.a]!;
       let i: number;
       if (e.kind === "bat") i = ((e.v ?? 9) - vd) / RINT;
+      else if (e.kind === "src") i = ((srcV.get(e.id) ?? 0) - vd) / RSRC;
       else if (e.kind === "led") i = on.get(e.id) && !isBurned(e) ? GL * (vd - (e.vf ?? 2)) : 0;
       else i = vd * cond(e, isBurned(e));
       R[e.id] = { v: vd, i };
@@ -105,6 +116,12 @@ export function simulate(nodes: number, elems: Elem[], wires: Wire[]): SimResult
     for (const w of wires) R[w.id] = { v: 0, i: w.a === w.b ? 0 : (V[w.a]! - V[w.b]!) * GC };
 
     let changed = false;
+    for (const e of elems) {
+      if (e.kind === "src" && e.ca !== undefined && e.cb !== undefined) {
+        const want = (e.gain ?? 0) * (V[e.cb]! - V[e.ca]!);
+        if (Math.abs(want - (srcV.get(e.id) ?? 0)) > 1e-6) { srcV.set(e.id, want); changed = true; }
+      }
+    }
     for (const e of elems) {
       if (isBurned(e)) continue;
       const r = R[e.id]!;

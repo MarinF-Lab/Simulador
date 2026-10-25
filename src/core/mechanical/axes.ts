@@ -24,6 +24,7 @@ export const ROTORS: Record<string, { r: number; t: number; local: "x" | "z"; ge
 /** Eje de salida de los motores: centro local del tramo de eje, dirección local y largo. */
 export const MOTOR_SHAFT: Record<string, { c: V; dir: V; t: number }> = {
   dcmotor: { c: [25, 0, 0], dir: [1, 0, 0], t: 10 },
+  stepper: { c: [0, 0, 20], dir: [0, 0, 1], t: 10 },
 };
 
 export const isRotor = (type: string): boolean => type in ROTORS;

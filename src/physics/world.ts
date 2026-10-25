@@ -7,11 +7,13 @@
 
 import RAPIER from "@dimforge/rapier3d-compat";
 import { holeAt } from "../core/model/holes";
+import type { Joint } from "../core/model/project";
 import { extent, rotateLocal, sizeOf, type Part, type Project, type Vec3 } from "../core/model/project";
 import { ROTORS } from "../core/mechanical/axes";
 import { checkStructure } from "../core/model/structure";
 import { motorCurrent, motorParams, motorTorque, noLoadSpeed, type MotorParams } from "../core/coupling/dcmotor";
 import type { Issue } from "../core/electrical/circuit";
+import { atLimit, servoRamp } from "../core/coupling/control";
 
 const S = 0.001; // mm → m
 const STEP = 1 / 120;
@@ -37,23 +39,72 @@ export interface MotorState {
   rpm: number;
   current: number;
   torque: number;
+  /** Ángulo del eje respecto del inicio, en grados (servo y paso a paso). */
+  angle?: number;
+  /** Salida del vástago del actuador lineal, en mm. */
+  ext?: number;
 }
 
 export interface SimStatus {
   issues: Issue[];
   flag: Record<number, "err" | "warn">;
   motors: Record<number, MotorState>;
+  /** Ángulo de cada junta rotacional, en grados. */
+  jointAngle: Record<number, number>;
+  /** Sensores de contacto que alguna pieza está tocando. */
+  pressed: Record<number, boolean>;
   t: number;
 }
 
+/** Lo que la simulación lee del diseño mientras corre: voltajes del circuito y propiedades. */
+export interface SimEnv {
+  voltage: (id: number) => number;
+  props: (id: number) => Record<string, unknown>;
+}
+
+type DriveKind = "dc" | "servo" | "stepper" | "linear";
+
 interface Drive {
-  joint: RAPIER.RevoluteImpulseJoint;
+  kind: DriveKind;
+  joint: RAPIER.RevoluteImpulseJoint | RAPIER.PrismaticImpulseJoint;
   motor: number;
   driven: number;
   axis: Vec3;
   params: MotorParams;
   slow: number;
   heavy: number;
+  /** Pasos acumulados (paso a paso) y fracción pendiente. */
+  steps: number;
+  frac: number;
+  /** Ángulo continuo medido (grados) y offset inicial del actuador. */
+  angle: number;
+  limit: number;
+  d0: Vec3;
+}
+
+const num = (v: unknown, d: number) => (typeof v === "number" && Number.isFinite(v) ? v : d);
+const qmul = (a: number[], b: number[]): [number, number, number, number] => [
+  a[3]! * b[0]! + a[0]! * b[3]! + a[1]! * b[2]! - a[2]! * b[1]!,
+  a[3]! * b[1]! - a[0]! * b[2]! + a[1]! * b[3]! + a[2]! * b[0]!,
+  a[3]! * b[2]! + a[0]! * b[1]! - a[1]! * b[0]! + a[2]! * b[3]!,
+  a[3]! * b[3]! - a[0]! * b[0]! - a[1]! * b[1]! - a[2]! * b[2]!,
+];
+const conj = (q: { x: number; y: number; z: number; w: number }) => [-q.x, -q.y, -q.z, q.w];
+const add3 = (a: Vec3, b: Vec3): Vec3 => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
+/** Gira el vector v con el cuaternión q. */
+function rot3(q: number[], v: Vec3): Vec3 {
+  const [x, y, z, w] = q as [number, number, number, number];
+  const ix = w * v[0] + y * v[2] - z * v[1], iy = w * v[1] + z * v[0] - x * v[2], iz = w * v[2] + x * v[1] - y * v[0], iw = -x * v[0] - y * v[1] - z * v[2];
+  return [ix * w + iw * -x + iy * -z - iz * -y, iy * w + iw * -y + iz * -x - ix * -z, iz * w + iw * -z + ix * -y - iy * -x];
+}
+const arr = (q: { x: number; y: number; z: number; w: number }) => [q.x, q.y, q.z, q.w];
+
+/** Ángulo (grados) del cuerpo B respecto de A, alrededor de un eje que empezó igual en ambos. */
+function relAngle(A: RAPIER.RigidBody, B: RAPIER.RigidBody, axis: Vec3): number {
+  let r = qmul(conj(A.rotation()), arr(B.rotation()));
+  // q y −q son el mismo giro: se usa el de w ≥ 0 para que el ángulo quede entre −180° y 180°.
+  if (r[3] < 0) r = [-r[0], -r[1], -r[2], -r[3]];
+  return (2 * Math.atan2(r[0] * axis[0] + r[1] * axis[1] + r[2] * axis[2], r[3]) * 180) / Math.PI;
 }
 
 /** Giro de una pieza como cuaternión (Euler XYZ en cuartos de vuelta). */
@@ -70,6 +121,12 @@ export class Sim {
   private drives: Drive[] = [];
   private acc = 0;
   private fallen = new Set<number>();
+  private revs: { id: number; A: RAPIER.RigidBody; B: RAPIER.RigidBody; axis: Vec3 }[] = [];
+  private sensors: { id: number; collider: RAPIER.Collider; ignore: Set<number> }[] = [];
+  private partOf = new Map<number, number>();
+  private kinEdges: { parent: number; child: number; joint: number; servo: boolean; pivot: Vec3; axis: Vec3 }[] = [];
+  /** Servos que mueven piezas por cinemática: ángulo pedido (rampa) y ángulo actual. */
+  private servos = new Map<number, { cmd: number; limit: number }>();
   t = 0;
 
   constructor(project: Project) {
@@ -81,23 +138,64 @@ export class Sim {
     const table = this.world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(0, 0, -0.01));
     this.world.createCollider(RAPIER.ColliderDesc.cuboid(0.6, 0.4, 0.01).setFriction(0.8), table);
 
+    // Brazos con servos: lo que cuelga de un servo (por su brazo y por uniones fijas) se mueve
+    // por cinemática, siguiendo los ángulos de los servos. Así varios servos encadenados quedan
+    // exactos y estables; esas piezas igual empujan a las demás.
+    const broken0 = checkStructure(project).broken;
+    const typeOf = new Map(project.parts.map((p) => [p.id, p.type]));
+    const kin = new Set<number>();
+    const edges: { parent: number; child: number; joint: number; servo: boolean; pivot: Vec3; axis: Vec3 }[] = [];
+    const servoEdge = (j: Joint) => {
+      const ha = holeAt(project, j.a), hb = holeAt(project, j.b);
+      if (!ha || !hb) return null;
+      const shaftA = ha.shaft && typeOf.get(j.a.part) === "servo", shaftB = hb.shaft && typeOf.get(j.b.part) === "servo";
+      if (!shaftA && !shaftB) return null;
+      return { parent: shaftA ? j.a.part : j.b.part, child: shaftA ? j.b.part : j.a.part, pivot: ha.p as Vec3, axis: (shaftA ? ha.n : hb.n) as Vec3 };
+    };
+    const okJoints = (project.joints ?? []).filter((j) => !broken0.has(j.id));
+    const queue: number[] = [];
+    for (const j of okJoints) {
+      const e = servoEdge(j);
+      if (e && !kin.has(e.child)) { edges.push({ ...e, joint: j.id, servo: true }); kin.add(e.child); queue.push(e.child); }
+    }
+    while (queue.length) {
+      const id = queue.shift()!;
+      for (const j of okJoints) {
+        if (j.a.part !== id && j.b.part !== id) continue;
+        const other = j.a.part === id ? j.b.part : j.a.part;
+        if (kin.has(other) || typeOf.get(other) === "plate") continue;
+        const e = servoEdge(j);
+        if (e && e.parent === id) { edges.push({ ...e, joint: j.id, servo: true }); kin.add(other); queue.push(other); continue; }
+        if (j.kind === "fixed" && !e) {
+          const h = holeAt(project, j.a)!;
+          edges.push({ parent: id, child: other, joint: j.id, servo: false, pivot: h.p as Vec3, axis: [0, 0, 1] });
+          kin.add(other);
+          queue.push(other);
+        }
+      }
+    }
+    this.kinEdges = edges;
+
     for (const part of project.parts) {
       // Engranajes, poleas y ejes siguen el cálculo de transmisiones: no son cuerpos libres.
       if (ROTORS[part.type]) continue;
       const ez = extent(part)[2];
       const c: Vec3 = [part.x, part.y, part.z + ez / 2];
       const fixed = part.type === "plate"; // la placa base queda anclada a la mesa
-      const desc = (fixed ? RAPIER.RigidBodyDesc.fixed() : RAPIER.RigidBodyDesc.dynamic()).setTranslation(c[0] * S, c[1] * S, c[2] * S);
+      const base = fixed ? RAPIER.RigidBodyDesc.fixed() : kin.has(part.id) ? RAPIER.RigidBodyDesc.kinematicPositionBased() : RAPIER.RigidBodyDesc.dynamic();
+      const desc = base.setTranslation(c[0] * S, c[1] * S, c[2] * S);
       const body = this.world.createRigidBody(desc);
       const [sx, sy, sz] = sizeOf(part.type, part.props);
       const q = partQuat(part.rot);
-      this.world.createCollider(
+      const col = this.world.createCollider(
         RAPIER.ColliderDesc.cuboid((sx / 2) * S, (sy / 2) * S, (sz / 2) * S)
           .setRotation({ x: q[0], y: q[1], z: q[2], w: q[3] })
           .setDensity(density(part.type))
           .setFriction(0.7),
         body,
       );
+      this.partOf.set(col.handle, part.id);
+      if (part.type === "sensorContact") this.sensors.push({ id: part.id, collider: col, ignore: new Set() });
       this.bodies.set(part.id, body);
       this.start.set(part.id, c);
     }
@@ -109,7 +207,7 @@ export class Sim {
       if (!P0) continue;
       for (const part of project.parts) {
         const B = this.bodies.get(part.id);
-        if (!B || part.id === plate.id || Math.abs(part.z - (plate.z + pz)) > 0.5) continue;
+        if (!B || kin.has(part.id) || part.id === plate.id || Math.abs(part.z - (plate.z + pz)) > 0.5) continue;
         const [ex, ey] = extent(part);
         if (Math.abs(part.x - plate.x) > (px + ex) / 2 - 1 || Math.abs(part.y - plate.y) > (py + ey) / 2 - 1) continue;
         const a = this.start.get(plate.id)!, b = this.start.get(part.id)!;
@@ -120,8 +218,9 @@ export class Sim {
     }
 
     const broken = checkStructure(project).broken;
+    const kinJoint = new Set(edges.map((e) => e.joint));
     for (const j of project.joints ?? []) {
-      if (broken.has(j.id)) continue;
+      if (broken.has(j.id) || kinJoint.has(j.id)) continue;
       const A = this.bodies.get(j.a.part), B = this.bodies.get(j.b.part);
       const ha = holeAt(project, j.a), hb = holeAt(project, j.b);
       if (!A || !B || !ha || !hb) continue;
@@ -130,40 +229,150 @@ export class Sim {
       const lb = { x: (ha.p[0] - pb[0]) * S, y: (ha.p[1] - pb[1]) * S, z: (ha.p[2] - pb[2]) * S };
       const axis = { x: ha.n[0], y: ha.n[1], z: ha.n[2] };
       const shaft = ha.shaft || hb.shaft;
-      const data = j.kind === "fixed" && !shaft
-        ? RAPIER.JointData.fixed(la, { x: 0, y: 0, z: 0, w: 1 }, lb, { x: 0, y: 0, z: 0, w: 1 })
-        : RAPIER.JointData.revolute(la, lb, axis);
+      const motorId = ha.shaft ? j.a.part : j.b.part;
+      const motorPart = shaft ? project.parts.find((p) => p.id === motorId)! : null;
+      const kind: DriveKind | null = !motorPart ? null : motorPart.type === "servo" ? "servo" : motorPart.type === "stepper" ? "stepper" : motorPart.type === "linear" ? "linear" : "dc";
+      // El eje (o el vástago) apunta hacia afuera del actuador: es el sentido positivo.
+      const dir = (ha.shaft ? ha.n : hb.n) as Vec3;
+      // En la junta deslizante, el avance positivo es el del segundo cuerpo respecto del primero:
+      // si el actuador es el segundo, el eje va al revés para que "salir" siga siendo positivo.
+      const sg = motorId === j.a.part ? 1 : -1;
+      const data = kind === "linear"
+        ? RAPIER.JointData.prismatic(la, lb, { x: sg * dir[0], y: sg * dir[1], z: sg * dir[2] })
+        : j.kind === "fixed" && !shaft
+          ? RAPIER.JointData.fixed(la, { x: 0, y: 0, z: 0, w: 1 }, lb, { x: 0, y: 0, z: 0, w: 1 })
+          : RAPIER.JointData.revolute(la, lb, axis);
       const joint = this.world.createImpulseJoint(data, A, B, true);
       joint.setContactsEnabled(false);
-      if (shaft) {
-        const motorId = ha.shaft ? j.a.part : j.b.part;
-        const motorPart = project.parts.find((p) => p.id === motorId)!;
-        // El eje del motor apunta hacia afuera del motor: es el sentido positivo del giro.
-        const dir = (ha.shaft ? ha.n : hb.n) as Vec3;
-        const rev = joint as RAPIER.RevoluteImpulseJoint;
-        rev.configureMotorModel(RAPIER.MotorModel.ForceBased);
-        this.drives.push({ joint: rev, motor: motorId, driven: motorId === j.a.part ? j.b.part : j.a.part, axis: dir, params: motorParams(motorPart.props), slow: 0, heavy: 0 });
+      if (j.kind === "revolute" || shaft) this.revs.push({ id: j.id, A, B, axis: ha.n as Vec3 });
+      if (kind && motorPart) {
+        const drv = joint as RAPIER.RevoluteImpulseJoint | RAPIER.PrismaticImpulseJoint;
+        drv.configureMotorModel(RAPIER.MotorModel.ForceBased);
+        if (kind === "linear") {
+          // El vástago sale desde su posición de diseño hasta la carrera.
+          (drv as RAPIER.PrismaticImpulseJoint).setLimits(0, num(motorPart.props.stroke, 100) * S);
+        }
+        const driven = motorId === j.a.part ? j.b.part : j.a.part;
+        const pm = this.start.get(motorId)!, pd = this.start.get(driven)!;
+        this.drives.push({
+          kind, joint: drv, motor: motorId, driven, axis: dir, params: motorParams(motorPart.props),
+          slow: 0, heavy: 0, steps: 0, frac: 0, angle: 0, limit: 0, d0: [pd[0] - pm[0], pd[1] - pm[1], pd[2] - pm[2]],
+        });
+      }
+    }
+    // Un sensor de contacto no se presiona con lo que lo sostiene ni con lo que está unido a él.
+    for (const sn of this.sensors) {
+      const me = project.parts.find((p) => p.id === sn.id)!;
+      for (const o of project.parts) {
+        const [ox, oy, oz] = extent(o), [ex, ey] = extent(me);
+        const below = Math.abs(o.z + oz - me.z) < 0.6 && Math.abs(o.x - me.x) < (ox + ex) / 2 && Math.abs(o.y - me.y) < (oy + ey) / 2;
+        if (below) sn.ignore.add(o.id);
+      }
+      for (const j of project.joints ?? []) {
+        if (j.a.part === sn.id) sn.ignore.add(j.b.part);
+        if (j.b.part === sn.id) sn.ignore.add(j.a.part);
       }
     }
   }
 
-  /** Avanza la simulación. `voltage` da el voltaje de cada motor según el circuito. */
-  step(dt: number, voltage: (motorId: number) => number): void {
+  /** Avanza la simulación con paso fijo. */
+  step(dt: number, env: SimEnv): void {
     this.acc += Math.min(dt, 0.05);
     let n = 0;
     while (this.acc >= STEP && n < 6) {
-      // Motor DC como motor de velocidad de la junta: par = c · (ω0 − ω), con
-      // ω0 = V / Ke y c = Kt · Ke / R. Es exactamente Kt · (V − Ke · ω) / R, y Rapier lo
-      // resuelve de forma implícita, estable aunque las piezas sean muy livianas.
-      for (const d of this.drives) {
-        const m = d.params;
-        d.joint.configureMotorVelocity(voltage(d.motor) / m.ke, (m.kt * m.ke) / m.r);
-      }
+      for (const d of this.drives) this.drive(d, env);
+      this.kinematics(env);
       this.world.step();
       this.acc -= STEP;
       this.t += STEP;
       n++;
     }
+  }
+
+  /** Ubica las piezas que cuelgan de servos según sus ángulos (cinemática directa). */
+  private kinematics(env: SimEnv): void {
+    if (!this.kinEdges.length) return;
+    const pose = new Map<number, { t: Vec3; q: [number, number, number, number] }>();
+    const get = (id: number) => {
+      const b = this.bodies.get(id)!;
+      if (!pose.has(id)) {
+        const t = b.translation(), r = b.rotation();
+        pose.set(id, { t: [t.x / S, t.y / S, t.z / S], q: [r.x, r.y, r.z, r.w] });
+      }
+      return pose.get(id)!;
+    };
+    for (const e of this.kinEdges) {
+      if (!this.bodies.has(e.parent) || !this.bodies.has(e.child)) continue;
+      let ang = 0;
+      if (e.servo) {
+        const pr = env.props(e.parent);
+        const st = this.servos.get(e.parent) ?? { cmd: 0, limit: 0 };
+        const spec = { amin: num(pr.amin, -90), amax: num(pr.amax, 90), speed: Math.max(1, num(pr.speed, 45)) };
+        if (Math.abs(env.voltage(e.parent)) >= 4) {
+          st.cmd = servoRamp(spec, st.cmd, num(pr.target, 0), STEP);
+          st.limit = atLimit(spec, num(pr.target, 0), st.cmd) ? st.limit + STEP : 0;
+        }
+        this.servos.set(e.parent, st);
+        ang = (st.cmd * Math.PI) / 180;
+      }
+      // Pose del hijo = pose del padre · giro alrededor del pivote · desplazamiento inicial.
+      const P = get(e.parent);
+      const p0 = this.start.get(e.parent)!, c0 = this.start.get(e.child)!;
+      const pivot: Vec3 = [e.pivot[0] - p0[0], e.pivot[1] - p0[1], e.pivot[2] - p0[2]];
+      const off: Vec3 = [c0[0] - e.pivot[0], c0[1] - e.pivot[1], c0[2] - e.pivot[2]];
+      const h = ang / 2, sn = Math.sin(h);
+      const qj: [number, number, number, number] = [e.axis[0] * sn, e.axis[1] * sn, e.axis[2] * sn, Math.cos(h)];
+      const local = add3(pivot, rot3(qj, off)); // en el marco del padre
+      const t = add3(P.t, rot3(P.q, local));
+      const q = qmul(P.q, qj);
+      pose.set(e.child, { t, q });
+      const b = this.bodies.get(e.child)!;
+      b.setNextKinematicTranslation({ x: t[0] * S, y: t[1] * S, z: t[2] * S });
+      b.setNextKinematicRotation({ x: q[0], y: q[1], z: q[2], w: q[3] });
+    }
+  }
+
+  private drive(d: Drive, env: SimEnv): void {
+    const v = env.voltage(d.motor);
+    const pr = env.props(d.motor);
+    const M = this.bodies.get(d.motor)!, D = this.bodies.get(d.driven)!;
+    if (d.kind === "dc") {
+      // Motor DC como motor de velocidad de la junta: par = c · (ω0 − ω), con ω0 = V / Ke
+      // y c = Kt · Ke / R. Es exactamente Kt · (V − Ke · ω) / R, resuelto de forma estable.
+      const m = d.params;
+      d.joint.configureMotorVelocity(v / m.ke, (m.kt * m.ke) / m.r);
+    } else if (d.kind === "stepper") {
+      // Paso a paso: avanza de a un paso fijo y lo sostiene con su par de retención.
+      const spr = Math.max(4, num(pr.steps, 200)), sps = num(pr.sps, 100);
+      if (Math.abs(v) >= 3) {
+        d.frac += sps * STEP * Math.sign(v);
+        const whole = Math.trunc(d.frac);
+        d.steps += whole;
+        d.frac -= whole;
+      }
+      const target = (d.steps * 2 * Math.PI) / spr;
+      const k = num(pr.torque, 0.4) / ((2 * Math.PI) / spr);
+      (d.joint as RAPIER.RevoluteImpulseJoint).configureMotorPosition(target, k, k * 0.02);
+      d.angle = relAngle(M, D, d.axis);
+    } else {
+      // Actuador lineal: el vástago sale (+) o entra (−) según la polaridad, a su velocidad.
+      const speed = num(pr.lspeed, 20) * S;
+      const force = num(pr.force, 30);
+      const dir = Math.abs(v) >= 1 ? Math.sign(v) : 0;
+      d.joint.configureMotorVelocity(dir * speed, force / Math.max(speed, 1e-4));
+    }
+  }
+
+  /** Salida de cada actuador lineal (mm), para dibujar el vástago en cada cuadro. */
+  extensions(): Map<number, number> {
+    const out = new Map<number, number>();
+    for (const d of this.drives) {
+      if (d.kind !== "linear") continue;
+      const pm = this.bodies.get(d.motor)!.translation(), pd = this.bodies.get(d.driven)!.translation();
+      const rel: Vec3 = [(pd.x - pm.x) / S - d.d0[0], (pd.y - pm.y) / S - d.d0[1], (pd.z - pm.z) / S - d.d0[2]];
+      out.set(d.motor, rel[0] * d.axis[0] + rel[1] * d.axis[1] + rel[2] * d.axis[2]);
+    }
+    return out;
   }
 
   poses(): Map<number, Pose> {
@@ -176,20 +385,50 @@ export class Sim {
   }
 
   /** Estado para mostrar: motores, derrumbes, motores atascados o sobrecargados. */
-  status(voltage: (motorId: number) => number, dtSinceLast: number): SimStatus {
+  status(env: SimEnv | ((id: number) => number), dtSinceLast: number): SimStatus {
+    const voltage = typeof env === "function" ? env : env.voltage;
     const issues: Issue[] = [];
     const flag: Record<number, "err" | "warn"> = {};
     const motors: Record<number, MotorState> = {};
     for (const d of this.drives) {
       const M = this.bodies.get(d.motor)!, D = this.bodies.get(d.driven)!;
+      const v = voltage(d.motor);
+      if (d.kind === "linear") {
+        const pm = M.translation(), pd = D.translation();
+        const rel: Vec3 = [(pd.x - pm.x) / S - d.d0[0], (pd.y - pm.y) / S - d.d0[1], (pd.z - pm.z) / S - d.d0[2]];
+        motors[d.motor] = { rpm: 0, current: 0, torque: 0, ext: rel[0] * d.axis[0] + rel[1] * d.axis[1] + rel[2] * d.axis[2] };
+        continue;
+      }
       const wm = M.angvel(), wd = D.angvel();
       const w = (wd.x - wm.x) * d.axis[0] + (wd.y - wm.y) * d.axis[1] + (wd.z - wm.z) * d.axis[2];
-      const v = voltage(d.motor);
+      const rpm = (w * 60) / (2 * Math.PI);
+      if (d.kind !== "dc") {
+        motors[d.motor] = { rpm, current: 0, torque: 0, angle: relAngle(M, D, d.axis) };
+        continue;
+      }
       const i = motorCurrent(d.params, v, w);
-      motors[d.motor] = { rpm: (w * 60) / (2 * Math.PI), current: i, torque: motorTorque(d.params, v, w) };
+      motors[d.motor] = { rpm, current: i, torque: motorTorque(d.params, v, w) };
       const expected = noLoadSpeed(d.params, v);
       d.slow = Math.abs(v) > 0.5 && Math.abs(w) < 0.2 * Math.abs(expected) ? d.slow + dtSinceLast : 0;
       d.heavy = Math.abs(i) > 0.7 * d.params.iStall ? d.heavy + dtSinceLast : 0;
+    }
+    for (const [id, st] of this.servos) motors[id] = { rpm: 0, current: 0, torque: 0, angle: st.cmd };
+    const capped = [...this.drives.filter((d) => d.limit > 0.3).map((d) => d.motor), ...[...this.servos].filter(([, st]) => st.limit > 0.3).map(([id]) => id)];
+    if (capped.length) {
+      issues.push({ s: "info", h: "Límite de articulación alcanzado", t: "Un servo llegó a su ángulo mínimo o máximo y no puede seguir. Cambia el ángulo pedido o amplía sus límites en Propiedades.", ids: capped });
+    }
+    const jointAngle: Record<number, number> = {};
+    for (const r of this.revs) jointAngle[r.id] = relAngle(r.A, r.B, r.axis);
+    for (const e of this.kinEdges) if (e.servo) jointAngle[e.joint] = this.servos.get(e.parent)?.cmd ?? 0;
+    const pressed: Record<number, boolean> = {};
+    for (const sn of this.sensors) {
+      let hit = false;
+      this.world.contactPairsWith(sn.collider, (other) => {
+        const pid = this.partOf.get(other.handle);
+        if (pid === undefined || sn.ignore.has(pid)) return;
+        this.world.contactPair(sn.collider, other, (m) => { if (m.numContacts() > 0) hit = true; });
+      });
+      pressed[sn.id] = hit;
     }
     const stuck = this.drives.filter((d) => d.slow > 0.6);
     if (stuck.length) {
@@ -211,7 +450,7 @@ export class Sim {
       issues.push({ s: "warn", h: "Estructura que se derrumba", t: this.fallen.size > 1 ? `${this.fallen.size} piezas cayeron porque nada las sostiene. Apóyalas o únelas con una unión fija o una junta.` : "Una pieza cayó porque nada la sostiene. Apóyala o únela con una unión fija o una junta.", ids: [...this.fallen] });
       this.fallen.forEach((id) => { if (!flag[id]) flag[id] = "warn"; });
     }
-    return { issues, flag, motors, t: this.t };
+    return { issues, flag, motors, jointAngle, pressed, t: this.t };
   }
 
   free(): void {

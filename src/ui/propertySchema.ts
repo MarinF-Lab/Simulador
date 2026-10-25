@@ -17,14 +17,14 @@ export interface Section {
   fields: Field[];
 }
 
-const motor = (extra: Field[] = []): Section => ({
+const motor = (extra: Field[] = [], vnomDef = 12): Section => ({
   id: "motor",
   title: "Motor",
   fields: [
     { type: "number", key: "power", label: "Potencia nominal", unit: "W", min: 0.1, max: 500, def: 12 },
     { type: "number", key: "rpm", label: "Velocidad nominal", unit: "RPM", min: 1, max: 20000, def: 60 },
     { type: "number", key: "torque", label: "Par de salida", unit: "N·m", min: 0.01, max: 50, def: 0.8 },
-    { type: "number", key: "vnom", label: "Voltaje nominal", unit: "V", min: 0.5, max: 24, def: 12 },
+    { type: "number", key: "vnom", label: "Voltaje nominal", unit: "V", min: 0.5, max: 24, def: vnomDef },
     ...extra,
   ],
 });
@@ -50,14 +50,6 @@ const joint: Section = {
     { type: "slider", key: "speed", label: "Velocidad de movimiento", unit: "°/s", min: 1, max: 180, def: 45 },
   ],
 };
-const arm: Section = {
-  id: "arm",
-  title: "Brazo",
-  fields: [
-    { type: "slider", key: "t1", label: "θ1 · base", unit: "°", min: -90, max: 90, def: 20 },
-    { type: "slider", key: "t2", label: "θ2 · codo", unit: "°", min: -90, max: 90, def: -35 },
-  ],
-};
 const electric = (fields: Field[]): Section => ({ id: "elec", title: "Valores", fields });
 
 export function sectionsFor(kind: PartKind): Section[] {
@@ -65,11 +57,23 @@ export function sectionsFor(kind: PartKind): Section[] {
     case "dcmotor":
       return [motor(), control];
     case "stepper":
-      return [motor([{ type: "number", key: "steps", label: "Pasos por vuelta", min: 4, max: 1000, def: 200 }]), control];
+      return [motor([
+        { type: "number", key: "steps", label: "Pasos por vuelta", min: 4, max: 1000, def: 200 },
+        { type: "number", key: "sps", label: "Velocidad", unit: "pasos/s", min: 1, max: 2000, def: 100 },
+      ]), control];
     case "servo":
-      return [motor(), joint, arm];
+      return [motor([], 6), joint];
     case "linear":
-      return [motor([{ type: "number", key: "stroke", label: "Carrera", unit: "mm", min: 10, max: 500, def: 100 }]), control];
+      return [{
+        id: "linear",
+        title: "Actuador",
+        fields: [
+          { type: "number", key: "stroke", label: "Carrera", unit: "mm", min: 10, max: 300, def: 100 },
+          { type: "number", key: "lspeed", label: "Velocidad", unit: "mm/s", min: 1, max: 200, def: 20 },
+          { type: "number", key: "force", label: "Fuerza", unit: "N", min: 1, max: 500, def: 30 },
+          { type: "number", key: "vnom", label: "Voltaje nominal", unit: "V", min: 0.5, max: 24, def: 12 },
+        ],
+      }, control];
     case "gear":
       return [transmission()];
     case "pulley":
@@ -79,7 +83,7 @@ export function sectionsFor(kind: PartKind): Section[] {
       return [transmission()];
     case "joint":
     case "link":
-      return [joint, arm];
+      return [];
     case "source":
       return [electric([{ type: "volt", key: "v", label: "Voltaje de la pila", min: 0.5, max: 24, def: 9, presets: [1.5, 3.7, 9, 12] }])];
     case "resistor":

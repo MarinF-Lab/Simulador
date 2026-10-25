@@ -121,10 +121,21 @@ function useSimPose(ref: RefObject<THREE.Group | null>, part: Part, center: [num
   });
 }
 
+/** Corre el vástago del actuador lineal según la simulación. */
+function useRod(ref: RefObject<THREE.Group | null>, part: Part) {
+  const rod = useRef<THREE.Object3D | null>(null);
+  useFrame(() => {
+    if (part.type !== "linear" || !ref.current) return;
+    rod.current ??= ref.current.getObjectByName("rod") ?? null;
+    if (rod.current) rod.current.position.x = simPoses.ext.get(part.id) ?? 0;
+  });
+}
+
 function Part3D({ part }: { part: Part }) {
   const ez = extent(part)[2];
   const ref = useRef<THREE.Group>(null);
   useSimPose(ref, part, [part.x, part.y, part.z + ez / 2]);
+  useRod(ref, part);
   const reading = useProject((s) => s.circuit.readings[part.id]);
   const glow = part.type === "lamp" || part.type === "led" ? brightness(part.type, part.props, reading) : 0;
   const on = part.type === "sensorContact" ? part.props.pressed === true : part.props.closed !== false;

@@ -6,7 +6,7 @@ import { detachFrom, endPos, posKey, reattach, termWorld } from "../core/model/t
 import { snapRotor } from "../core/mechanical/snap";
 import { isRotor } from "../core/mechanical/axes";
 import { solveTrain, type Train } from "../core/mechanical/train";
-import { alignedPairs, restHeight, snapHoles, type HoleRef } from "../core/model/holes";
+import { alignedPairs, holesOf, restHeight, snapHoles, type HoleRef } from "../core/model/holes";
 import { checkStructure, type StructureCheck } from "../core/model/structure";
 import type { Joint } from "../core/model/project";
 
@@ -19,12 +19,25 @@ export interface JointOffer {
   shaft: boolean;
 }
 
+/** Proyecto con los sensores que la simulación está presionando. */
+function withPressed(p: Project, pressed: Record<number, boolean>): Project {
+  if (!Object.values(pressed).some(Boolean)) return p;
+  return { ...p, parts: p.parts.map((x) => (pressed[x.id] ? { ...x, props: { ...x.props, pressed: true } } : x)) };
+}
+
 /** RPM de cada motor según el voltaje que recibe: RPM nominal × V / V nominal. */
 export function motorSpeeds(project: Project, circuit: Circuit): Record<number, number> {
   const out: Record<number, number> = {};
   for (const p of project.parts) {
-    if (p.type !== "dcmotor") continue;
     const v = circuit.readings[p.id]?.v ?? 0;
+    if (p.type === "stepper") {
+      // Paso a paso: pasos por segundo ÷ pasos por vuelta, si recibe al menos 3 V.
+      const spr = typeof p.props.steps === "number" ? p.props.steps : 200;
+      const sps = typeof p.props.sps === "number" ? p.props.sps : 100;
+      out[p.id] = Math.abs(v) >= 3 && p.props.burned !== true ? (Math.sign(v) * sps * 60) / spr : 0;
+      continue;
+    }
+    if (p.type !== "dcmotor") continue;
     const rpmN = typeof p.props.rpm === "number" ? p.props.rpm : 60;
     const vn = typeof p.props.vnom === "number" ? p.props.vnom : 12;
     out[p.id] = p.props.burned === true ? 0 : (rpmN * v) / vn;
@@ -84,6 +97,9 @@ interface ProjectState {
   actuate: (id: number) => void;
   /** Cambia el largo (lx) o el ancho (ly) de una estructura, de 10 en 10 mm. */
   setSize: (id: number, key: "lx" | "ly", mm: number) => void;
+  /** Sensores presionados por la simulación: cambian el circuito, no el diseño ni el historial. */
+  pressed: Record<number, boolean>;
+  setPressed: (p: Record<number, boolean>) => void;
   remove: (id: number) => void;
   /** Toque en un borne: el primero queda pendiente, el segundo crea el cable. */
   tapTerminal: (t: TermRef) => void;
@@ -117,6 +133,12 @@ function wire(id: number, a: Part, ta: number, b: Part, tb: number): Cable {
 }
 
 /** Ejemplo inicial: el circuito de la ampolleta y un tren de engranajes. */
+/** Corre la pieza para que su agujero h quede justo en el punto p. */
+function onHole(part: Part, h: number, p: Vec3): Part {
+  const hole = holesOf(part)[h]!;
+  return { ...part, x: part.x + p[0] - hole.p[0], y: part.y + p[1] - hole.p[1], z: part.z + p[2] - hole.p[2] };
+}
+
 function sample(): Project {
   const P = (id: number, type: string, x: number, y: number, rz = 0, props: Part["props"] = {}, z = 0): Part => ({ id, type, x, y, z, rot: [0, 0, rz], props });
   const bat = P(1, "source", -220, 40, 0, { v: 9 });
@@ -133,17 +155,31 @@ function sample(): Project {
   const link: Part = { id: 18, type: "link", x: 203, y: -40, z: 66, rot: [0, 0, 0], props: { lx: 60 } };
   const arm: Part = { id: 19, type: "profile60", x: 251, y: -40, z: 72, rot: [0, 0, 0], props: {} };
   const bat2 = P(20, "source", 70, -120, 0, { v: 12 });
-  const parts = [bat, sw, res, lamp, P(8, "profile240", -60, -80), plate, motor, g10, axle, g40, link, arm, bat2];
+  const parts: Part[] = [bat, sw, res, lamp, P(8, "profile240", -60, -80), plate, motor, g10, axle, g40, link, arm, bat2];
   const cables = [wire(9, bat, 1, sw, 0), wire(10, sw, 1, res, 0), wire(11, res, 1, lamp, 1), wire(12, lamp, 0, bat, 0),
     wire(21, bat2, 1, motor, 1), wire(22, motor, 0, bat2, 0)];
-  const base: Project = { parts, cables, belts: [], nextId: 23 };
+  // Brazo robótico de 2 articulaciones con servos (como en la referencia), alimentado con 6 V.
+  const plate2 = P(30, "plate", -200, -230, 0, { lx: 160, ly: 120 });
+  const servo1: Part = { id: 31, type: "servo", x: -220, y: -230, z: 6, rot: [0, 0, 0], props: { target: 30, speed: 60, torque: 0.8 } };
+  const link1 = onHole({ id: 32, type: "link", x: 0, y: 0, z: 0, rot: [0, 0, 0], props: { lx: 80 } }, 1, holesOf(servo1)[2]!.p);
+  const servo2 = onHole({ id: 33, type: "servo", x: 0, y: 0, z: 0, rot: [0, 0, 0], props: { target: -45, speed: 60, torque: 0.8 } }, 0, holesOf(link1)[2]!.p);
+  const link2 = onHole({ id: 34, type: "link", x: 0, y: 0, z: 0, rot: [0, 0, 0], props: { lx: 80 } }, 1, holesOf(servo2)[2]!.p);
+  const bat3 = P(35, "source", -300, -110, 0, { v: 6 });
+  parts.push(plate2, servo1, link1, servo2, link2, bat3);
+  cables.push(wire(36, bat3, 1, servo1, 1), wire(37, bat3, 0, servo1, 0), wire(38, servo1, 1, servo2, 1), wire(39, servo1, 0, servo2, 0));
+  const base: Project = { parts, cables, belts: [], nextId: 40 };
   // Juntas: el eslabón en el eje del motor y el perfil sobre el otro extremo del eslabón.
   const onShaft = alignedPairs(base, 18).find((q) => q.shaft);
   const elbow = alignedPairs(base, 19).find((q) => q.b.part === 18);
   const joints: Joint[] = [];
   if (onShaft) joints.push({ id: 23, kind: "revolute", a: onShaft.a, b: onShaft.b });
   if (elbow) joints.push({ id: 24, kind: "revolute", a: elbow.a, b: elbow.b });
-  return { ...base, joints, nextId: 25 };
+  joints.push(
+    { id: 40, kind: "revolute", a: { part: 32, h: 1 }, b: { part: 31, h: 2 } }, // hombro: eslabón 1 en el servo 1
+    { id: 41, kind: "fixed", a: { part: 33, h: 0 }, b: { part: 32, h: 2 } }, // servo 2 atornillado al eslabón 1
+    { id: 42, kind: "revolute", a: { part: 34, h: 1 }, b: { part: 33, h: 2 } }, // codo: eslabón 2 en el servo 2
+  );
+  return { ...base, joints, nextId: 43 };
 }
 
 export const useProject = create<ProjectState>((set, get) => {
@@ -353,6 +389,16 @@ export const useProject = create<ProjectState>((set, get) => {
     setZ: (id, z) => commit(updateCmd(get().project, id, { z: clampZ(z) }, `${id}:z`)),
     setProp: (id, key, v) => commit(updateCmd(get().project, id, { props: { [key]: v } } as Patch, `${id}:${key}`)),
     replace: (id) => commit(updateCmd(get().project, id, { props: { burned: undefined, burnV: undefined } })),
+    pressed: {},
+    setPressed: (p) => {
+      const cur = get().pressed;
+      const same = Object.keys(p).length === Object.keys(cur).length && Object.entries(p).every(([k, v]) => cur[+k] === v);
+      if (same) return;
+      set({ pressed: p });
+      const s = get();
+      const c = analyze(withPressed(s.project, p));
+      set({ circuit: c, mech: solveTrain(s.project, motorSpeeds(s.project, c)) });
+    },
     setSize: (id, key, mm) => {
       const p = part(id);
       const range = p && RESIZABLE[p.type]?.[key];
@@ -367,6 +413,11 @@ export const useProject = create<ProjectState>((set, get) => {
       if (!p) return;
       if (p.type === "switch") commit(updateCmd(get().project, id, { props: { closed: p.props.closed === false } }));
       else if (p.type === "sensorContact") commit(updateCmd(get().project, id, { props: { pressed: p.props.pressed !== true } }));
+      else if (p.type === "hbridge") {
+        const order = ["Adelante", "Atrás", "Freno"];
+        const cur = typeof p.props.dir === "string" ? order.indexOf(p.props.dir) : 0;
+        commit(updateCmd(get().project, id, { props: { dir: order[(Math.max(0, cur) + 1) % 3]! } }));
+      }
     },
     remove: (id) => {
       const s = get();
@@ -484,7 +535,7 @@ export const useProject = create<ProjectState>((set, get) => {
 // en la pieza (fuera del historial, como pasaría en la realidad) y se vuelve a calcular.
 useProject.subscribe((s, prev) => {
   if (s.project === prev.project) return;
-  const c = analyze(s.project);
+  const c = analyze(withPressed(s.project, s.pressed));
   if (c.burns.length) {
     const burnt = new Map(c.burns.map((b) => [b.id, b.v]));
     useProject.setState({

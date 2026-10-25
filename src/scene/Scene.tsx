@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useLayoutEffect, useMemo, useRef } from "react";
 import { Canvas } from "@react-three/fiber";
 import * as THREE from "three";
 import { extent, TABLE, type Part } from "../core/model/project";
@@ -66,6 +66,23 @@ function Part3D({ part }: { part: Part }) {
   );
 }
 
+/** Luz principal con sombras. El área de la sombra cubre toda la mesa. */
+function SunLight() {
+  const ref = useRef<THREE.DirectionalLight>(null);
+  useLayoutEffect(() => {
+    const l = ref.current;
+    if (!l) return;
+    const c = l.shadow.camera;
+    c.left = -800; c.right = 800; c.top = 800; c.bottom = -800; c.near = 100; c.far = 2600;
+    c.updateProjectionMatrix();
+    l.shadow.mapSize.set(2048, 2048);
+    l.shadow.bias = -0.0005;
+    l.shadow.normalBias = 0.6;
+    l.shadow.needsUpdate = true;
+  }, []);
+  return <directionalLight ref={ref} position={[350, -500, 900]} intensity={2.6} castShadow />;
+}
+
 export function Scene() {
   const parts = useProject((s) => s.project.parts);
   const selected = useProject((s) => s.selected);
@@ -82,20 +99,7 @@ export function Scene() {
     >
       <color attach="background" args={["#0f1424"]} />
       <hemisphereLight args={["#d4dcff", "#2a3050", 1.6]} />
-      <directionalLight
-        position={[350, -500, 900]}
-        intensity={2.6}
-        castShadow
-        shadow-mapSize={[1024, 1024]}
-        shadow-camera-left={-900}
-        shadow-camera-right={900}
-        shadow-camera-top={900}
-        shadow-camera-bottom={-900}
-        shadow-camera-near={10}
-        shadow-camera-far={3000}
-        shadow-bias={-0.0006}
-        shadow-normalBias={1.5}
-      />
+      <SunLight />
       <Table />
       <group name="parts">
         {parts.map((p) => <Part3D key={p.id} part={p} />)}

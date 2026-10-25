@@ -8,6 +8,8 @@ export interface SceneApi {
   zoomBy: (factor: number) => void;
   fit: () => void;
   rotateView: (dir: 1 | -1) => void;
+  /** Vuelve a la vista isométrica más cercana. */
+  isoView: () => void;
   /** Arrastre que empieza fuera del lienzo (desde la biblioteca). */
   externalDrag: (id: number | null, clientX?: number, clientY?: number) => void;
 }
@@ -19,6 +21,7 @@ export const sceneApi: SceneApi = {
   zoomBy: noop,
   fit: noop,
   rotateView: noop,
+  isoView: noop,
   externalDrag: noop,
 };
 

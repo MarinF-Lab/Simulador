@@ -5,15 +5,20 @@ import { bounds, extent, TABLE } from "../core/model/project";
 import { useProject } from "../store/project";
 import { overlay, sceneApi } from "./api";
 
-// Cámara ortográfica isométrica y gestos de la mesa:
-// un dedo en el fondo desplaza, dos dedos hacen zoom, la rueda acerca o aleja,
-// y una pieza se arrastra sobre el piso con ajuste a la cuadrícula.
+// Cámara ortográfica libre y gestos de la mesa:
+// - un dedo en el fondo desplaza; dos dedos: pellizco = zoom, giro = orbitar, subir o bajar juntos = inclinar
+// - mouse: rueda = zoom, botón derecho o Mayús + arrastrar = orbitar
+// - una pieza se arrastra sobre el piso con ajuste a la cuadrícula.
 
-const EL = Math.atan(1 / Math.SQRT2); // 35,26°: elevación isométrica
+const ISO_EL = Math.atan(1 / Math.SQRT2); // 35,26°: elevación isométrica
+const ISO_AZ = -Math.PI / 4;
+const EL_MIN = (15 * Math.PI) / 180, EL_MAX = (89 * Math.PI) / 180;
+const ORBIT_PX = 0.008, TILT_PX = 0.006; // radianes por píxel
 const ZMIN = 0.15, ZMAX = 8;
 const EDGE = 30, EDGE_SPEED = 9; // px
 
 type Drag =
+  | { kind: "orbit"; pid: number; lx: number; ly: number }
   | { kind: "pan"; pid: number; sx: number; sy: number; p0: THREE.Vector3; moved: boolean }
   | { kind: "part"; pid: number; sx: number; sy: number; id: number; off: { x: number; y: number }; from: { x: number; y: number }; moved: boolean }
   | { kind: "ext"; id: number };
@@ -29,9 +34,10 @@ const reduced = (() => {
 export function Controller() {
   const { camera, gl, size, scene, invalidate } = useThree();
   const cam = camera as THREE.OrthographicCamera;
-  const view = useRef({ az: 0, azNow: 0, tx: 0, ty: 0, zoom: 1 });
+  /** az y el: ángulos actuales; azGoal y elGoal: destino de una animación (girar 90°, isométrica). */
+  const view = useRef({ az: ISO_AZ, el: ISO_EL, azGoal: ISO_AZ, elGoal: ISO_EL, tx: 0, ty: 0, zoom: 1 });
   const ptrs = useRef(new Map<number, { x: number; y: number }>());
-  const pinch = useRef<{ d0: number; z0: number; p0: THREE.Vector3 } | null>(null);
+  const pinch = useRef<{ d: number; ang: number; my: number; mx0: number; my0: number; p0: THREE.Vector3 } | null>(null);
   const drag = useRef<Drag | null>(null);
   const last = useRef<{ x: number; y: number } | null>(null);
   const lastTap = useRef({ id: 0, t: 0 });
@@ -49,10 +55,9 @@ export function Controller() {
   /** Coloca la cámara según la vista actual. */
   const applyCamera = () => {
     const v = view.current;
-    const a = Math.PI / 4 + v.azNow * (Math.PI / 2) - Math.PI / 2;
     const R = 3000;
     cam.up.set(0, 0, 1);
-    cam.position.set(v.tx + R * Math.cos(EL) * Math.cos(a), v.ty + R * Math.cos(EL) * Math.sin(a), R * Math.sin(EL));
+    cam.position.set(v.tx + R * Math.cos(v.el) * Math.cos(v.az), v.ty + R * Math.cos(v.el) * Math.sin(v.az), R * Math.sin(v.el));
     cam.lookAt(v.tx, v.ty, 0);
     cam.zoom = v.zoom;
     cam.updateProjectionMatrix();
@@ -73,6 +78,7 @@ export function Controller() {
   const clampView = () => {
     const v = view.current;
     v.zoom = Math.min(ZMAX, Math.max(ZMIN, v.zoom));
+    v.el = Math.min(EL_MAX, Math.max(EL_MIN, v.el));
     v.tx = Math.min(TABLE.w / 2, Math.max(-TABLE.w / 2, v.tx));
     v.ty = Math.min(TABLE.d / 2, Math.max(-TABLE.d / 2, v.ty));
   };
@@ -133,7 +139,7 @@ export function Controller() {
   /** Lleva la pieza arrastrada bajo el dedo. */
   const followPointer = () => {
     const d = drag.current, l = last.current;
-    if (!d || !l || d.kind === "pan") return;
+    if (!d || !l || d.kind === "pan" || d.kind === "orbit") return;
     const g = ground(l.x, l.y);
     if (!g) return;
     const off = d.kind === "part" ? d.off : { x: 0, y: 0 };
@@ -144,7 +150,7 @@ export function Controller() {
   const edgeTick = () => {
     edgeRaf.current = 0;
     const d = drag.current, l = last.current;
-    if (!d || d.kind === "pan" || (d.kind === "part" && !d.moved) || !l) return;
+    if (!d || d.kind === "pan" || d.kind === "orbit" || (d.kind === "part" && !d.moved) || !l) return;
     const r = rect();
     const inside = l.x >= r.left && l.x <= r.right && l.y >= r.top && l.y <= r.bottom;
     if (inside) {
@@ -181,16 +187,37 @@ export function Controller() {
       drag.current = null;
       const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
       const p0 = ground(mx, my);
-      if (p0) pinch.current = { d0: Math.hypot(a.x - b.x, a.y - b.y) || 1, z0: view.current.zoom, p0 };
+      if (p0) pinch.current = { d: Math.hypot(a.x - b.x, a.y - b.y) || 1, ang: Math.atan2(b.y - a.y, b.x - a.x), my, mx0: mx, my0: my, p0 };
+    };
+
+    /** Orbita alrededor del centro de la vista. */
+    const orbit = (dAz: number, dEl: number) => {
+      const v = view.current;
+      v.az += dAz;
+      v.el += dEl;
+      clampView();
+      v.azGoal = v.az;
+      v.elGoal = v.el;
+      applyCamera();
+      invalidate();
     };
 
     const down = (e: PointerEvent) => {
+      if (e.button === 2) {
+        try { el.setPointerCapture(e.pointerId); } catch { /* sin captura */ }
+        drag.current = { kind: "orbit", pid: e.pointerId, lx: e.clientX, ly: e.clientY };
+        return;
+      }
       if (e.button > 0) return;
       try { el.setPointerCapture(e.pointerId); } catch { /* sin captura */ }
       ptrs.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (ptrs.current.size === 2) return startPinch();
       if (ptrs.current.size > 2) return;
       last.current = { x: e.clientX, y: e.clientY };
+      if (e.pointerType === "mouse" && e.shiftKey) {
+        drag.current = { kind: "orbit", pid: e.pointerId, lx: e.clientX, ly: e.clientY };
+        return;
+      }
       const id = hitPart(e.clientX, e.clientY);
       const g = ground(e.clientX, e.clientY);
       if (id !== null && g) {
@@ -207,14 +234,30 @@ export function Controller() {
       if (pc) {
         const [a, b] = [...ptrs.current.values()];
         if (!a || !b) return;
-        view.current.zoom = pc.z0 * (Math.hypot(a.x - b.x, a.y - b.y) / pc.d0);
+        const dist = Math.hypot(a.x - b.x, a.y - b.y) || 1;
+        const ang = Math.atan2(b.y - a.y, b.x - a.x);
+        const my = (a.y + b.y) / 2;
+        let dAng = ang - pc.ang;
+        if (dAng > Math.PI) dAng -= 2 * Math.PI;
+        if (dAng < -Math.PI) dAng += 2 * Math.PI;
+        orbit(-dAng, (my - pc.my) * TILT_PX);
+        view.current.zoom *= dist / pc.d;
         clampView();
-        keepUnder(pc.p0, (a.x + b.x) / 2, (a.y + b.y) / 2);
+        keepUnder(pc.p0, pc.mx0, pc.my0);
+        pc.d = dist;
+        pc.ang = ang;
+        pc.my = my;
         invalidate();
         return;
       }
       const d = drag.current;
       if (!d || d.kind === "ext" || d.pid !== e.pointerId) return;
+      if (d.kind === "orbit") {
+        orbit(-(e.clientX - d.lx) * ORBIT_PX, (e.clientY - d.ly) * TILT_PX);
+        d.lx = e.clientX;
+        d.ly = e.clientY;
+        return;
+      }
       last.current = { x: e.clientX, y: e.clientY };
       if (!d.moved && Math.hypot(e.clientX - d.sx, e.clientY - d.sy) > 6) {
         d.moved = true;
@@ -240,6 +283,7 @@ export function Controller() {
       const d = drag.current;
       if (!d || d.kind === "ext" || d.pid !== e.pointerId) return;
       drag.current = null;
+      if (d.kind === "orbit") return;
       const cancel = e.type === "pointercancel";
       if (d.kind === "pan") {
         if (!d.moved && !cancel) P().select(null);
@@ -267,6 +311,8 @@ export function Controller() {
     window.addEventListener("pointerup", up);
     window.addEventListener("pointercancel", up);
     el.addEventListener("wheel", wheel, { passive: false });
+    const noMenu = (e: Event) => e.preventDefault();
+    el.addEventListener("contextmenu", noMenu);
 
     sceneApi.screenToTable = (cx, cy) => {
       const r = rect();
@@ -281,8 +327,20 @@ export function Controller() {
     };
     sceneApi.fit = fit;
     sceneApi.rotateView = (dir) => {
-      view.current.az += dir;
-      if (reduced) view.current.azNow = view.current.az;
+      const v = view.current;
+      // Lleva a la siguiente vista isométrica (45° + múltiplos de 90°).
+      const q = Math.PI / 2;
+      const k = Math.round((v.azGoal - ISO_AZ) / q);
+      v.azGoal = ISO_AZ + (k + dir) * q;
+      if (reduced) v.az = v.azGoal;
+      invalidate();
+    };
+    sceneApi.isoView = () => {
+      const v = view.current;
+      const q = Math.PI / 2;
+      v.azGoal = ISO_AZ + Math.round((v.az - ISO_AZ) / q) * q;
+      v.elGoal = ISO_EL;
+      if (reduced) { v.az = v.azGoal; v.el = v.elGoal; }
       invalidate();
     };
     sceneApi.externalDrag = (id, cx, cy) => {
@@ -304,6 +362,7 @@ export function Controller() {
       window.removeEventListener("pointerup", up);
       window.removeEventListener("pointercancel", up);
       el.removeEventListener("wheel", wheel);
+      el.removeEventListener("contextmenu", noMenu);
       if (edgeRaf.current) cancelAnimationFrame(edgeRaf.current);
     };
     // Las funciones internas leen refs; basta con registrarlas una vez por lienzo.
@@ -322,10 +381,11 @@ export function Controller() {
   const tmp = useRef(new THREE.Vector3());
   useFrame(() => {
     const v = view.current;
-    if (Math.abs(v.azNow - v.az) > 0.001) {
-      v.azNow += (v.az - v.azNow) * 0.22;
-      if (Math.abs(v.azNow - v.az) < 0.002) v.azNow = v.az;
-      invalidate();
+    for (const [k, g] of [["az", "azGoal"], ["el", "elGoal"]] as const) {
+      if (Math.abs(v[k] - v[g]) > 0.002) {
+        v[k] += (v[g] - v[k]) * 0.22;
+        invalidate();
+      } else v[k] = v[g];
     }
     applyCamera();
 

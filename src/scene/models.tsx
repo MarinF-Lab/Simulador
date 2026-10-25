@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import * as THREE from "three";
+import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { sizeOf } from "../core/model/project";
 
 // Modelos 3D simples de cada pieza. Cada modelo se arma con la base en z = 0 y centrado
@@ -95,15 +96,33 @@ function Pulley({ r }: { r: number }) {
   );
 }
 
-function Holes({ len, y = 0, z, every = 10 }: { len: number; y?: number; z: number; every?: number }) {
-  const xs: number[] = [];
-  for (let x = -len / 2 + every / 2; x < len / 2; x += every) xs.push(x);
-  return (
-    <>
-      {xs.map((x) => <Cyl key={x} r={2} h={0.6} p={[x, y, z]} m={M.hole} seg={10} />)}
-    </>
-  );
+const holeCache = new Map<string, THREE.BufferGeometry>();
+/** Fila de agujeros unida en una sola figura: una llamada de dibujo por pieza en vez de una por agujero. */
+function holesGeometry(len: number, rows: number[], z: number, every: number): THREE.BufferGeometry {
+  const k = `${len}:${rows.join(",")}:${z}:${every}`;
+  const hit = holeCache.get(k);
+  if (hit) return hit;
+  const parts: THREE.BufferGeometry[] = [];
+  for (const y of rows) {
+    for (let x = -len / 2 + every / 2; x < len / 2; x += every) {
+      const g = new THREE.CylinderGeometry(2, 2, 0.6, 10);
+      g.rotateX(Math.PI / 2);
+      g.translate(x, y, z + 0.3);
+      parts.push(g);
+    }
+  }
+  const merged = mergeGeometries(parts) ?? new THREE.BufferGeometry();
+  parts.forEach((g) => g.dispose());
+  holeCache.set(k, merged);
+  return merged;
 }
+
+function Holes({ len, rows = [0], z, every = 10 }: { len: number; rows?: number[]; z: number; every?: number }) {
+  const geo = useMemo(() => holesGeometry(len, rows, z, every), [len, rows, z, every]);
+  return <mesh geometry={geo} material={M.hole} />;
+}
+
+const PLATE_ROWS = [-40, -20, 0, 20, 40];
 
 function Wire() {
   const geo = useMemo(() => {
@@ -297,7 +316,7 @@ function Model({ type }: { type: string }) {
       return (
         <group>
           <Box s={[160, 100, 6]} m={M.dark} />
-          {[-40, -20, 0, 20, 40].map((y) => <Holes key={y} len={160} y={y} z={6} every={20} />)}
+          <Holes len={160} rows={PLATE_ROWS} z={6} every={20} />
         </group>
       );
     case "bolt":

@@ -1,5 +1,5 @@
 import { lazy, Suspense } from "react";
-import { Info, Maximize, Minus, Plus, RotateCcw, RotateCw } from "lucide-react";
+import { Box, Info, Maximize, Minus, Plus, RotateCcw, RotateCw } from "lucide-react";
 import { findItem } from "../core/model/catalog";
 import { overlay, sceneApi } from "../scene/api";
 import { useProject } from "../store/project";
@@ -42,7 +42,7 @@ export function Workspace() {
       ? "Toca Iniciar para simular el circuito y el mecanismo juntos."
       : item
         ? `Arrastra ${item.name.toLowerCase()} para moverlo. Toca dos veces o usa ⟳ para girarlo 90°.`
-        : "Arrastra piezas desde Componentes. Mueve la mesa con un dedo y acerca o aleja con dos.";
+        : "Mueve la mesa con un dedo. Con dos dedos: pellizca para acercar, gira para orbitar y sube o baja para inclinar.";
 
   return (
     <div className="relative min-h-0 flex-1 overflow-hidden bg-bg">
@@ -71,7 +71,8 @@ export function Workspace() {
         <button className={viewBtn} onClick={() => sceneApi.zoomBy(1.25)} aria-label="Acercar"><Plus className="size-5" /></button>
         <button className={viewBtn} onClick={() => sceneApi.zoomBy(0.8)} aria-label="Alejar"><Minus className="size-5" /></button>
         <button className={viewBtn} onClick={() => sceneApi.fit()} aria-label="Ajustar vista"><Maximize className="size-5" /></button>
-        <button className={viewBtn} onClick={() => sceneApi.rotateView(1)} aria-label="Girar vista 90°"><RotateCcw className="size-5" /></button>
+        <button className={viewBtn} onClick={() => sceneApi.rotateView(1)} aria-label="Girar vista 90°" title="Girar vista 90°"><RotateCcw className="size-5" /></button>
+        <button className={viewBtn} onClick={() => sceneApi.isoView()} aria-label="Vista isométrica" title="Vista isométrica"><Box className="size-5" /></button>
       </div>
 
       <div className="pointer-events-none absolute inset-x-3 bottom-[calc(76px+env(safe-area-inset-bottom,0px))] flex items-end gap-3 lg:bottom-3">

@@ -240,7 +240,7 @@ export function Controller() {
         let dAng = ang - pc.ang;
         if (dAng > Math.PI) dAng -= 2 * Math.PI;
         if (dAng < -Math.PI) dAng += 2 * Math.PI;
-        orbit(-dAng, (my - pc.my) * TILT_PX);
+        orbit(dAng, (my - pc.my) * TILT_PX);
         view.current.zoom *= dist / pc.d;
         clampView();
         keepUnder(pc.p0, pc.mx0, pc.my0);

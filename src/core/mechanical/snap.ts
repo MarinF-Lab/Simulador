@@ -25,7 +25,7 @@ export interface Snap {
 
 /** Ubica la pieza con su centro en `c`; null si quedaría bajo la mesa. */
 function at(part: Part, rot: Vec3, c: V): Snap | null {
-  const ez = extent({ type: part.type, rot })[2];
+  const ez = extent({ type: part.type, rot, props: part.props })[2];
   const z = Math.round((c[2] - ez / 2) * 10) / 10;
   if (z < -0.01) return null;
   return { x: Math.round(c[0] * 10) / 10, y: Math.round(c[1] * 10) / 10, z: Math.max(0, z), rot };

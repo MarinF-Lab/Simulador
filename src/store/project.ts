@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { cableDiff, emptyHistory, exec, record, redo, removeCableCmd, removeCmd, shapeOf, undo, updateCmd, type CableShape, type Command, type History, type Patch } from "../core/history/commands";
 import { analyze, type Circuit } from "../core/electrical/analyze";
-import { clampZ, findFree, newPart, placeOnTable, type Axis, type Cable, type CableEnd, type Part, type Project, type PropValue, type Vec3 } from "../core/model/project";
+import { clampZ, findFree, newPart, placeOnTable, RESIZABLE, type Axis, type Cable, type CableEnd, type Part, type Project, type PropValue, type Vec3 } from "../core/model/project";
 import { detachFrom, endPos, posKey, reattach, termWorld } from "../core/model/terminals";
 import { snapRotor } from "../core/mechanical/snap";
 import { isRotor } from "../core/mechanical/axes";
@@ -61,6 +61,8 @@ interface ProjectState {
   replace: (id: number) => void;
   /** Accionar: abre o cierra un interruptor, presiona o suelta un sensor de contacto. */
   actuate: (id: number) => void;
+  /** Cambia el largo (lx) o el ancho (ly) de una estructura, de 10 en 10 mm. */
+  setSize: (id: number, key: "lx" | "ly", mm: number) => void;
   remove: (id: number) => void;
   /** Toque en un borne: el primero queda pendiente, el segundo crea el cable. */
   tapTerminal: (t: TermRef) => void;
@@ -265,6 +267,15 @@ export const useProject = create<ProjectState>((set, get) => {
     setZ: (id, z) => commit(updateCmd(get().project, id, { z: clampZ(z) }, `${id}:z`)),
     setProp: (id, key, v) => commit(updateCmd(get().project, id, { props: { [key]: v } } as Patch, `${id}:${key}`)),
     replace: (id) => commit(updateCmd(get().project, id, { props: { burned: undefined, burnV: undefined } })),
+    setSize: (id, key, mm) => {
+      const p = part(id);
+      const range = p && RESIZABLE[p.type]?.[key];
+      if (!p || !range) return;
+      const v = Math.min(range[1], Math.max(range[0], Math.round(mm / 10) * 10));
+      const next = { ...p, props: { ...p.props, [key]: v } };
+      const at = placeOnTable(next, p.x, p.y);
+      commit(updateCmd(get().project, id, { props: { [key]: v }, ...at }, `${id}:${key}`));
+    },
     actuate: (id) => {
       const p = part(id);
       if (!p) return;

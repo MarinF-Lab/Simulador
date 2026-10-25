@@ -1,5 +1,6 @@
 import { lazy, Suspense } from "react";
-import { Box, Hand, Info, Maximize, Minus, Move, Plus, Power, RotateCcw, RotateCw, Spline, Trash2 } from "lucide-react";
+import { ArrowLeftRight, Box, Hand, Info, Maximize, Minus, Move, Plus, Power, RotateCcw, RotateCw, Spline, Trash2 } from "lucide-react";
+import { POLAR } from "../core/model/terminals";
 import { findItem } from "../core/model/catalog";
 import { overlay, sceneApi } from "../scene/api";
 import { useProject } from "../store/project";
@@ -43,7 +44,7 @@ export function Workspace() {
   const selected = useProject((s) => s.selected);
   const count = useProject((s) => s.project.parts.length);
   const type = useProject((s) => s.project.parts.find((p) => p.id === s.selected)?.type);
-  const { rotate, remove, cableMode, setCableMode, actuate } = useProject();
+  const { rotate, remove, cableMode, setCableMode, actuate, flip } = useProject();
   const selProps = useProject((s) => s.project.parts.find((p) => p.id === s.selected)?.props);
   const act = type === "switch"
     ? { label: selProps?.closed === false ? "Cerrar" : "Abrir", on: selProps?.closed !== false, Icon: Power }
@@ -81,6 +82,11 @@ export function Workspace() {
       </Suspense>
 
       <div ref={(el) => { overlay.partTools = el; }} hidden className="absolute top-0 left-0 z-10 flex gap-2">
+        {type && POLAR.has(type) && (
+          <button onClick={() => selected !== null && flip(selected)} className="flex min-h-11 items-center gap-1.5 rounded-full border border-line bg-panel px-4 text-sm font-semibold text-ink shadow-lg">
+            <ArrowLeftRight className="size-4" aria-hidden="true" /> {type === "dcmotor" ? "Invertir giro" : "Invertir polaridad"}
+          </button>
+        )}
         {act && (
           <button
             onClick={() => selected !== null && actuate(selected)}

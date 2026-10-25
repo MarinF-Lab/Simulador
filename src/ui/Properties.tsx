@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
-import { ArrowLeftRight, ChevronDown, ChevronUp, RotateCw, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronUp, RotateCw, Trash2 } from "lucide-react";
 import { brightness, ELEC_DEFAULTS } from "../core/electrical/analyze";
 import type { Issue } from "../core/electrical/circuit";
 import { findItem } from "../core/model/catalog";
-import { endPos, POLAR, posKey } from "../core/model/terminals";
+import { endPos, posKey } from "../core/model/terminals";
 import { fmt, fmtA, fmtV, parseDecimal } from "../core/model/units";
-import { extent, type Axis, type PropValue } from "../core/model/project";
+import { extent, RESIZABLE, sizeOf, type Axis, type PropValue } from "../core/model/project";
 import { useProject } from "../store/project";
 import { useUI } from "../store/ui";
 import { PartIcon } from "./PartIcon";
@@ -158,6 +158,36 @@ function FieldRow({ partId, field }: { partId: number; field: Field }) {
 }
 
 const sq = "grid size-10 place-items-center rounded-lg border border-line hover:border-accent/60 disabled:opacity-40";
+
+/** Largo y ancho de una estructura, con − / + de 10 en 10 mm y casilla para escribir. */
+function SizeEditor({ id }: { id: number }) {
+  const part = useProject((s) => s.project.parts.find((p) => p.id === id));
+  const setSize = useProject((s) => s.setSize);
+  if (!part) return null;
+  const spec = RESIZABLE[part.type];
+  if (!spec) return null;
+  const [lx, ly] = sizeOf(part.type, part.props);
+  const row = (key: "lx" | "ly", label: string, value: number, range: [number, number]) => (
+    <div key={key} className="flex min-h-11 items-center justify-between gap-3 text-sm">
+      <label htmlFor={`size-${id}-${key}`}>{label} <span className="text-muted">(mm)</span></label>
+      <span className="flex items-center gap-2">
+        <button className={sq} onClick={() => setSize(id, key, value - 10)} disabled={value <= range[0]} aria-label={`${label}: 10 mm menos`}>−</button>
+        <NumberInput id={`size-${id}-${key}`} label={`${label} en mm`} value={value} min={range[0]} max={range[1]} onChange={(v) => setSize(id, key, v)} />
+        <button className={sq} onClick={() => setSize(id, key, value + 10)} disabled={value >= range[1]} aria-label={`${label}: 10 mm más`}>+</button>
+      </span>
+    </div>
+  );
+  return (
+    <section className="rounded-xl border border-line px-3 py-2">
+      <h3 className="pb-1 text-xs font-semibold tracking-widest text-muted uppercase">Tamaño</h3>
+      <div className="flex flex-col divide-y divide-line/60">
+        {spec.lx && row("lx", "Largo", lx, spec.lx)}
+        {spec.ly && row("ly", "Ancho", ly, spec.ly)}
+      </div>
+      <p className="pb-1 text-xs text-muted">Los agujeros van cada 10 mm y se ajustan solos al cambiar el tamaño.</p>
+    </section>
+  );
+}
 
 function Placement({ id }: { id: number }) {
   const part = useProject((s) => s.project.parts.find((p) => p.id === id));
@@ -390,7 +420,7 @@ export function Properties() {
   const part = useProject((s) => s.project.parts.find((p) => p.id === s.selected));
   const isCable = useProject((s) => s.project.cables.some((c) => c.id === s.selected));
   const isBelt = useProject((s) => (s.project.belts ?? []).some((b) => b.id === s.selected));
-  const { remove, replace, flip, actuate } = useProject();
+  const { remove, replace, actuate } = useProject();
   const item = part ? findItem(part.type) : undefined;
 
   const body = (() => {
@@ -426,7 +456,7 @@ export function Properties() {
         {part.type === "dcmotor" && <MotorSpeed id={part.id} />}
         {isRotor(part.type) && <Motion id={part.id} />}
 
-        {(part.type === "switch" || part.type === "sensorContact" || POLAR.has(part.type)) && (
+        {(part.type === "switch" || part.type === "sensorContact") && (
           <div className="flex flex-wrap gap-2">
             {part.type === "switch" && (
               <button onClick={() => actuate(part.id)} className="min-h-11 flex-1 rounded-lg bg-accent px-3 text-sm font-semibold text-accent-ink">
@@ -436,11 +466,6 @@ export function Properties() {
             {part.type === "sensorContact" && (
               <button onClick={() => actuate(part.id)} className="min-h-11 flex-1 rounded-lg bg-accent px-3 text-sm font-semibold text-accent-ink">
                 {part.props.pressed === true ? "Soltar sensor" : "Presionar sensor"}
-              </button>
-            )}
-            {POLAR.has(part.type) && (
-              <button onClick={() => flip(part.id)} className="flex min-h-11 flex-1 items-center justify-center gap-2 rounded-lg border border-line px-3 text-sm font-medium hover:border-accent/60">
-                <ArrowLeftRight className="size-4" aria-hidden="true" /> Invertir polaridad
               </button>
             )}
           </div>
@@ -455,6 +480,7 @@ export function Properties() {
           </section>
         ))}
 
+        <SizeEditor id={part.id} />
         <Placement id={part.id} />
         <ComponentStatus id={part.id} />
       </>

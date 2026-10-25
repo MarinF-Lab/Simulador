@@ -244,6 +244,7 @@ function Readings({ id, type }: { id: number; type: string }) {
   const third = (() => {
     if (type === "lamp" || type === "led") return <Cell k="Brillo" v={`${Math.round(brightness(type, props, r) * 100)} %`} />;
     if (type === "switch") return <Cell k="Estado" v={props.closed === false ? "abierto" : "cerrado"} />;
+    if (type === "sensorContact") return <Cell k="Estado" v={props.pressed === true ? "presionado" : "suelto"} />;
     if (type === "meter") return <Cell k="Mide" v="entre bornes" />;
     return <Cell k="Potencia" v={`${Math.abs(r.v * r.i).toLocaleString("es-CL", { maximumFractionDigits: 3 })} W`} />;
   })();
@@ -389,7 +390,7 @@ export function Properties() {
   const part = useProject((s) => s.project.parts.find((p) => p.id === s.selected));
   const isCable = useProject((s) => s.project.cables.some((c) => c.id === s.selected));
   const isBelt = useProject((s) => (s.project.belts ?? []).some((b) => b.id === s.selected));
-  const { remove, setProp, replace, flip } = useProject();
+  const { remove, replace, flip, actuate } = useProject();
   const item = part ? findItem(part.type) : undefined;
 
   const body = (() => {
@@ -425,11 +426,16 @@ export function Properties() {
         {part.type === "dcmotor" && <MotorSpeed id={part.id} />}
         {isRotor(part.type) && <Motion id={part.id} />}
 
-        {(part.type === "switch" || POLAR.has(part.type)) && (
+        {(part.type === "switch" || part.type === "sensorContact" || POLAR.has(part.type)) && (
           <div className="flex flex-wrap gap-2">
             {part.type === "switch" && (
-              <button onClick={() => setProp(part.id, "closed", !closed)} className="min-h-11 flex-1 rounded-lg bg-accent px-3 text-sm font-semibold text-accent-ink">
+              <button onClick={() => actuate(part.id)} className="min-h-11 flex-1 rounded-lg bg-accent px-3 text-sm font-semibold text-accent-ink">
                 {closed ? "Abrir interruptor" : "Cerrar interruptor"}
+              </button>
+            )}
+            {part.type === "sensorContact" && (
+              <button onClick={() => actuate(part.id)} className="min-h-11 flex-1 rounded-lg bg-accent px-3 text-sm font-semibold text-accent-ink">
+                {part.props.pressed === true ? "Soltar sensor" : "Presionar sensor"}
               </button>
             )}
             {POLAR.has(part.type) && (

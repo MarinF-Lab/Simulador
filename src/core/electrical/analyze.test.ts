@@ -59,6 +59,16 @@ describe("avisos", () => {
     expect(c.flag[sw.id]).toBe("warn");
   });
 
+  it("el sensor de contacto cierra el circuito solo mientras está presionado", () => {
+    const lamp = P("lamp", 200, 200, { vn: 9 });
+    const free = analyze(loop(P("source", 0, 0), P("sensorContact", 200, 0), lamp));
+    expect(Math.abs(free.readings[lamp.id]!.v)).toBeLessThan(0.01);
+    const sensor = P("sensorContact", 200, 0, { pressed: true });
+    const lamp2 = P("lamp", 200, 200, { vn: 9 });
+    const pressed = analyze(loop(P("source", 0, 0), sensor, lamp2));
+    expect(Math.abs(pressed.readings[lamp2.id]!.v)).toBeGreaterThan(8.9);
+  });
+
   it("LED invertido", () => {
     const bat = P("source", 0, 0), r = P("resistor", 200, 0, { r: 470 }), led = P("led", 200, 200);
     const c = analyze({ parts: [bat, r, led], cables: [W(bat, 1, r, 1), W(r, 0, led, 0), W(led, 1, bat, 0)], nextId: nid });

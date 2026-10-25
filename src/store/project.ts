@@ -59,6 +59,8 @@ interface ProjectState {
   setZ: (id: number, z: number) => void;
   setProp: (id: number, key: string, v: PropValue) => void;
   replace: (id: number) => void;
+  /** Accionar: abre o cierra un interruptor, presiona o suelta un sensor de contacto. */
+  actuate: (id: number) => void;
   remove: (id: number) => void;
   /** Toque en un borne: el primero queda pendiente, el segundo crea el cable. */
   tapTerminal: (t: TermRef) => void;
@@ -263,6 +265,12 @@ export const useProject = create<ProjectState>((set, get) => {
     setZ: (id, z) => commit(updateCmd(get().project, id, { z: clampZ(z) }, `${id}:z`)),
     setProp: (id, key, v) => commit(updateCmd(get().project, id, { props: { [key]: v } } as Patch, `${id}:${key}`)),
     replace: (id) => commit(updateCmd(get().project, id, { props: { burned: undefined, burnV: undefined } })),
+    actuate: (id) => {
+      const p = part(id);
+      if (!p) return;
+      if (p.type === "switch") commit(updateCmd(get().project, id, { props: { closed: p.props.closed === false } }));
+      else if (p.type === "sensorContact") commit(updateCmd(get().project, id, { props: { pressed: p.props.pressed !== true } }));
+    },
     remove: (id) => {
       const s = get();
       const belts = s.project.belts ?? [];

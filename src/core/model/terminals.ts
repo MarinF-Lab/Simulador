@@ -11,6 +11,7 @@ export const TERMINALS: Record<string, [Vec3, Vec3]> = {
   switch: [[-20, 0, -5], [20, 0, -5]],
   meter: [[-10, -10, -20], [10, -10, -20]],
   dcmotor: [[-30, -7, 0], [-30, 7, 0]],
+  sensorContact: [[-10, 0, -3], [10, 0, -3]],
 };
 
 /** Piezas con polaridad: su borne + se marca en rojo. */

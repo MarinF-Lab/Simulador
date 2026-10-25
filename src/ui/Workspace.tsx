@@ -1,5 +1,5 @@
 import { lazy, Suspense } from "react";
-import { Box, Info, Maximize, Minus, Move, Plus, RotateCcw, RotateCw, Spline, Trash2 } from "lucide-react";
+import { Box, Hand, Info, Maximize, Minus, Move, Plus, Power, RotateCcw, RotateCw, Spline, Trash2 } from "lucide-react";
 import { findItem } from "../core/model/catalog";
 import { overlay, sceneApi } from "../scene/api";
 import { useProject } from "../store/project";
@@ -43,7 +43,13 @@ export function Workspace() {
   const selected = useProject((s) => s.selected);
   const count = useProject((s) => s.project.parts.length);
   const type = useProject((s) => s.project.parts.find((p) => p.id === s.selected)?.type);
-  const { rotate, remove, cableMode, setCableMode } = useProject();
+  const { rotate, remove, cableMode, setCableMode, actuate } = useProject();
+  const selProps = useProject((s) => s.project.parts.find((p) => p.id === s.selected)?.props);
+  const act = type === "switch"
+    ? { label: selProps?.closed === false ? "Cerrar" : "Abrir", on: selProps?.closed !== false, Icon: Power }
+    : type === "sensorContact"
+      ? { label: selProps?.pressed === true ? "Soltar" : "Presionar", on: selProps?.pressed === true, Icon: Hand }
+      : null;
   const item = type ? findItem(type) : undefined;
 
   const hint = beltMode
@@ -62,6 +68,8 @@ export function Workspace() {
         ? cableMode === "move"
           ? "Arrastra el cable para moverlo completo, o arrastra una punta hasta un borne."
           : "Arrastra el punto blanco para doblar el cable. Tócalo dos veces para dejarlo recto."
+      : act
+        ? `Toca ${act.label} para accionar ${type === "switch" ? "el interruptor" : "el sensor"}. Arrástralo para moverlo o toca un borne para empezar un cable.`
       : item
         ? `Arrastra ${item.name.toLowerCase()} para moverlo. Toca dos veces o usa ⟳ para girarlo 90°. Toca un borne para empezar un cable.`
         : "Mueve la mesa con un dedo. Con dos dedos: pellizca para acercar, gira para orbitar y sube o baja para inclinar.";
@@ -73,6 +81,15 @@ export function Workspace() {
       </Suspense>
 
       <div ref={(el) => { overlay.partTools = el; }} hidden className="absolute top-0 left-0 z-10 flex gap-2">
+        {act && (
+          <button
+            onClick={() => selected !== null && actuate(selected)}
+            aria-pressed={act.on}
+            className={"flex min-h-11 items-center gap-1.5 rounded-full px-4 text-sm font-semibold shadow-lg " + (act.on ? "bg-ok text-white" : "border border-line bg-panel text-ink")}
+          >
+            <act.Icon className="size-4" aria-hidden="true" /> {act.label}
+          </button>
+        )}
         <button onClick={() => selected !== null && rotate(selected)} aria-label="Girar 90°" className="grid size-11 place-items-center rounded-full bg-accent text-accent-ink shadow-lg">
           <RotateCw className="size-5" />
         </button>

@@ -88,7 +88,8 @@ function Part3D({ part }: { part: Part }) {
   const ez = extent(part)[2];
   const reading = useProject((s) => s.circuit.readings[part.id]);
   const glow = part.type === "lamp" || part.type === "led" ? brightness(part.type, part.props, reading) : 0;
-  const model = <PartModel type={part.type} glow={glow} burned={part.props.burned === true} />;
+  const on = part.type === "sensorContact" ? part.props.pressed === true : part.props.closed !== false;
+  const model = <PartModel type={part.type} glow={glow} burned={part.props.burned === true} on={on} />;
   const rotor = ROTORS[part.type];
   return (
     <group position={[part.x, part.y, part.z + ez / 2]} rotation={[part.rot[0] * Q, part.rot[1] * Q, part.rot[2] * Q]} userData={{ partId: part.id }}>

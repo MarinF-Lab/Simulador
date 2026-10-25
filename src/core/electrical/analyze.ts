@@ -7,12 +7,13 @@ import { fmt } from "../model/units";
 import { diagnose, simulate, type Elem, type ElemKind, type Issue, type Reading, type Wire } from "./circuit";
 
 const KIND: Record<string, ElemKind> = {
-  source: "bat", resistor: "res", switch: "sw", lamp: "bulb", dcmotor: "motor", led: "led", meter: "meter",
+  source: "bat", resistor: "res", switch: "sw", sensorContact: "sw", lamp: "bulb", dcmotor: "motor", led: "led", meter: "meter",
 };
 
 /** Valores por defecto de las piezas eléctricas. Los usa también el panel de Propiedades. */
 export const ELEC_DEFAULTS: Record<string, Record<string, number | boolean>> = {
   source: { v: 9 }, resistor: { r: 100 }, lamp: { vn: 6 }, led: { vf: 2 }, switch: { closed: true }, dcmotor: { vnom: 12 },
+  sensorContact: { pressed: false },
 };
 
 const num = (v: unknown, d: number) => (typeof v === "number" && Number.isFinite(v) ? v : d);
@@ -25,6 +26,7 @@ export function elemName(type: string, props: Record<string, unknown>): string {
     case "lamp": return `La ampolleta de ${fmt(p("vn"))} V`;
     case "led": return "El LED";
     case "switch": return "El interruptor";
+    case "sensorContact": return "El sensor de contacto";
     case "dcmotor": return "El motor";
     case "meter": return "El voltímetro";
     default: return findItem(type)?.name ?? "La pieza";
@@ -64,7 +66,8 @@ export function analyze(project: Project): Circuit {
       r: num(pr.r, num(d.r, 100)),
       vn: kind === "motor" ? num(pr.vnom, 12) : num(pr.vn, num(d.vn, 6)),
       vf: num(pr.vf, num(d.vf, 2)),
-      closed: pr.closed !== false,
+      // El sensor de contacto es un pulsador: cierra solo mientras está presionado.
+      closed: part.type === "sensorContact" ? pr.pressed === true : pr.closed !== false,
       burned: pr.burned === true,
       burnV: num(pr.burnV, 0),
     });

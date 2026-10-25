@@ -217,7 +217,7 @@ export function diagnose(d: DiagnoseInput): { issues: Issue[]; flag: Record<numb
   if (bats.length && !shorted.length && !handled.size && !active.length) {
     const openSw = elems.filter((e) => e.kind === "sw" && e.closed === false);
     let t = "No circula corriente, así que ningún componente recibe voltaje. ";
-    if (openSw.length) t += "Hay un interruptor abierto: ciérralo desde Propiedades.";
+    if (openSw.length) t += "Hay un interruptor abierto o un sensor sin presionar: acciónalo con el botón que aparece sobre la pieza.";
     else if (elems.some((e) => e.burned)) t += "Un componente quemado dejó el camino cortado.";
     else t += "Revisa que exista un camino cerrado desde el + de la pila, pasando por los componentes, hasta su −.";
     issues.push({ s: "warn", h: "Circuito abierto", t, ids: openSw.map((e) => e.id) });

@@ -169,9 +169,11 @@ function GlowMesh({ glow, burned, color, base, children, ...rest }: { glow: numb
 export interface ModelState {
   glow?: number;
   burned?: boolean;
+  /** Interruptor cerrado o sensor presionado. */
+  on?: boolean;
 }
 
-function Model({ type, glow = 0, burned = false }: { type: string } & ModelState) {
+function Model({ type, glow = 0, burned = false, on = true }: { type: string } & ModelState) {
   switch (type) {
     case "source":
       return (
@@ -220,7 +222,8 @@ function Model({ type, glow = 0, burned = false }: { type: string } & ModelState
         <group>
           <Box s={[40, 20, 10]} m={M.dark} />
           <Box s={[16, 12, 4]} p={[0, 0, 10]} m={M.black} />
-          <mesh position={[3, 0, 16]} rotation={[0, 0.5, 0]} material={M.red} castShadow>
+          {/* Palanca: inclinada hacia el lado que cierra o abre el contacto. */}
+          <mesh position={[on ? 3 : -3, 0, 16]} rotation={[0, on ? 0.5 : -0.5, 0]} material={on ? M.red : M.white} castShadow>
             <boxGeometry args={[4, 6, 12]} />
           </mesh>
         </group>
@@ -353,7 +356,7 @@ function Model({ type, glow = 0, burned = false }: { type: string } & ModelState
       return (
         <group>
           <Box s={[20, 20, 8]} m={M.pcb} />
-          {type === "sensorAngle" ? <Cyl r={6} h={6} p={[0, 0, 8]} m={M.white} /> : <Box s={[10, 8, 6]} p={[0, 0, 8]} m={M.red} />}
+          {type === "sensorAngle" ? <Cyl r={6} h={6} p={[0, 0, 8]} m={M.white} /> : <Box s={[10, 8, on ? 2 : 6]} p={[0, 0, 8]} m={M.red} />}
         </group>
       );
     case "meter":
@@ -378,11 +381,11 @@ function Model({ type, glow = 0, burned = false }: { type: string } & ModelState
 }
 
 /** Modelo centrado en su caja: el contenedor lo puede girar sobre su centro. */
-export function PartModel({ type, glow, burned }: { type: string } & ModelState) {
+export function PartModel({ type, glow, burned, on }: { type: string } & ModelState) {
   const h = sizeOf(type)[2];
   return (
     <group position={[0, 0, -h / 2]}>
-      <Model type={type} glow={glow} burned={burned} />
+      <Model type={type} glow={glow} burned={burned} on={on} />
     </group>
   );
 }

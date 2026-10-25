@@ -7,6 +7,7 @@ import { snap } from "../core/model/units";
 import { useProject, type TermRef } from "../store/project";
 import { shapeOf, type CableShape } from "../core/history/commands";
 import { cableMid } from "./cableCurve";
+import { holeAt } from "../core/model/holes";
 import { overlay, sceneApi } from "./api";
 
 // Cámara ortográfica libre y gestos de la mesa:
@@ -135,7 +136,7 @@ export function Controller() {
     invalidate();
   };
 
-  type Hit = { kind: "end"; id: number; i: 0 | 1 } | { kind: "bend"; id: number } | { kind: "term"; ref: TermRef } | { kind: "part"; id: number } | { kind: "cable"; id: number } | { kind: "belt"; id: number };
+  type Hit = { kind: "end"; id: number; i: 0 | 1 } | { kind: "bend"; id: number } | { kind: "term"; ref: TermRef } | { kind: "part"; id: number } | { kind: "cable"; id: number } | { kind: "belt"; id: number } | { kind: "joint"; id: number };
 
   /** Qué hay bajo el dedo. Prioridad: puntas de cable, bornes (si no están tapados), piezas y cables. */
   const hitAny = (cx: number, cy: number): Hit | null => {
@@ -148,6 +149,8 @@ export function Controller() {
     };
     const end = first("ends");
     if (end?.object.userData.cableEnd) return { kind: "end", ...(end.object.userData.cableEnd as { id: number; i: 0 | 1 }) };
+    const jh = first("joints");
+    if (jh?.object.userData.joint !== undefined) return { kind: "joint", id: jh.object.userData.joint as number };
     const bh = first("bend");
     if (bh?.object.userData.bendHandle !== undefined) return { kind: "bend", id: bh.object.userData.bendHandle as number };
     const term = first("terms"), part = first("parts"), cab = first("cables");
@@ -335,7 +338,7 @@ export function Controller() {
         const p = P().project.parts.find((q) => q.id === hit.id)!;
         drag.current = { kind: "part", ...base, id: hit.id, off: { x: p.x - g.x, y: p.y - g.y }, from: { x: p.x, y: p.y } };
       } else if (g) {
-        drag.current = { kind: "pan", ...base, p0: g, tapCable: hit?.kind === "cable" || hit?.kind === "belt" ? hit.id : null };
+        drag.current = { kind: "pan", ...base, p0: g, tapCable: hit?.kind === "cable" || hit?.kind === "belt" || hit?.kind === "joint" ? hit.id : null };
       }
     };
 
@@ -425,7 +428,10 @@ export function Controller() {
         P().endDrag(d.id, d.from);
       } else if (!cancel) {
         const now = performance.now();
-        if (P().beltMode) {
+        if (P().jointTool) {
+          const g2 = ground(e.clientX, e.clientY);
+          P().jointTap(d.id, g2 ? [g2.x, g2.y, g2.z] : [0, 0, 0]);
+        } else if (P().beltMode) {
           P().beltTap(d.id);
         } else if (lastTap.current.id === d.id && now - lastTap.current.t < 350) {
           lastTap.current = { id: 0, t: 0 };
@@ -543,6 +549,10 @@ export function Controller() {
     place(overlay.partTools, sp ? [sp.x, sp.y, sp.z + extent(sp)[2]] : null, 16, -62);
     const sc = st.project.cables.find((q) => q.id === st.selected);
     place(overlay.cableTools, sc ? cableMid(st.project, sc) : null, -(overlay.cableTools?.offsetWidth ?? 160) / 2, -70);
+    const sj = (st.project.joints ?? []).find((q) => q.id === st.selected);
+    const jp = sj && holeAt(st.project, sj.a);
+    place(overlay.jointTools, jp ? jp.p : null, -(overlay.jointTools?.offsetWidth ?? 160) / 2, -70);
+    place(overlay.offerTools, st.jointOffer ? st.jointOffer.p : null, -(overlay.offerTools?.offsetWidth ?? 200) / 2, 24);
     const sb = (st.project.belts ?? []).find((q) => q.id === st.selected);
     const A = sb && st.mech.axisOf[sb.a], B = sb && st.mech.axisOf[sb.b];
     place(overlay.beltTools, A && B ? [(A.c[0] + B.c[0]) / 2, (A.c[1] + B.c[1]) / 2, (A.c[2] + B.c[2]) / 2] : null, -(overlay.beltTools?.offsetWidth ?? 160) / 2, -70);

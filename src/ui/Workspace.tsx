@@ -1,5 +1,5 @@
 import { lazy, Suspense } from "react";
-import { ArrowLeftRight, Box, Hand, Info, Maximize, Minus, Move, Plus, Power, RotateCcw, RotateCw, Spline, Trash2 } from "lucide-react";
+import { ArrowLeftRight, Box, Hand, Info, Link2, Maximize, Minus, Move, Plus, Power, RotateCcw, RotateCw, Spline, Trash2, X } from "lucide-react";
 import { POLAR } from "../core/model/terminals";
 import { findItem } from "../core/model/catalog";
 import { overlay, sceneApi } from "../scene/api";
@@ -39,6 +39,10 @@ export function Workspace() {
   const isBelt = useProject((s) => (s.project.belts ?? []).some((b) => b.id === s.selected));
   const beltCross = useProject((s) => (s.project.belts ?? []).find((b) => b.id === s.selected)?.cross ?? false);
   const toggleCross = useProject((s) => s.toggleCross);
+  const jointTool = useProject((s) => s.jointTool);
+  const offer = useProject((s) => s.jointOffer);
+  const selJoint = useProject((s) => (s.project.joints ?? []).find((j) => j.id === s.selected));
+  const { acceptJoint, dismissJoint, setJointKind } = useProject();
   const top = issues[0];
   const counts = { err: issues.filter((i) => i.s === "err").length, warn: issues.filter((i) => i.s === "warn").length };
   const selected = useProject((s) => s.selected);
@@ -53,7 +57,15 @@ export function Workspace() {
       : null;
   const item = type ? findItem(type) : undefined;
 
-  const hint = beltMode
+  const hint = jointTool
+    ? `Toca una pieza que tenga un agujero alineado con otra para poner ${jointTool === "fixed" ? "una unión fija" : "una junta rotacional"}. Toca el fondo para cancelar.`
+    : offer
+    ? offer.shaft
+      ? "La pieza quedó sobre el eje del motor: móntala para que gire con él."
+      : "Dos agujeros quedaron alineados: elige junta rotacional (gira) o unión fija (perno)."
+    : selJoint
+    ? selJoint.kind === "revolute" ? "Junta rotacional: las piezas giran sobre este agujero al simular." : "Unión fija: las piezas quedan unidas como con un perno."
+    : beltMode
     ? beltMode.first === null
       ? "Toca la primera polea que unirá la correa. Toca el fondo para cancelar."
       : "Ahora toca la segunda polea. Deben quedar paralelas y en el mismo plano."
@@ -135,6 +147,35 @@ export function Workspace() {
           {beltCross ? "Cruzada" : "Normal"} · cambiar
         </button>
         <button onClick={() => selected !== null && remove(selected)} aria-label="Eliminar correa" className="grid size-11 place-items-center rounded-full bg-err text-white shadow-lg">
+          <Trash2 className="size-5" />
+        </button>
+      </div>
+
+      <div ref={(el) => { overlay.offerTools = el; }} hidden className="absolute top-0 left-0 z-10 flex items-center gap-2">
+        {offer?.shaft ? (
+          <button onClick={() => acceptJoint("revolute")} className="flex min-h-11 items-center gap-1.5 rounded-full bg-accent px-4 text-sm font-semibold text-accent-ink shadow-lg">
+            <Link2 className="size-4" aria-hidden="true" /> Montar en el eje
+          </button>
+        ) : (
+          <>
+            <button onClick={() => acceptJoint("revolute")} className="min-h-11 rounded-full bg-accent px-4 text-sm font-semibold text-accent-ink shadow-lg">Junta rotacional</button>
+            <button onClick={() => acceptJoint("fixed")} className="min-h-11 rounded-full border border-line bg-panel px-4 text-sm font-semibold shadow-lg">Unión fija</button>
+          </>
+        )}
+        <button onClick={dismissJoint} aria-label="No unir" className="grid size-11 place-items-center rounded-full border border-line bg-panel text-muted shadow-lg">
+          <X className="size-5" />
+        </button>
+      </div>
+
+      <div ref={(el) => { overlay.jointTools = el; }} hidden className="absolute top-0 left-0 z-10 flex items-center gap-2">
+        <div role="radiogroup" aria-label="Tipo de junta" className="flex rounded-full border border-line bg-panel p-1 shadow-lg">
+          {([["revolute", "Rotacional"], ["fixed", "Fija"]] as const).map(([k, label]) => (
+            <button key={k} role="radio" aria-checked={selJoint?.kind === k} onClick={() => selJoint && setJointKind(selJoint.id, k)} className={"min-h-9 rounded-full px-3 text-xs font-semibold " + (selJoint?.kind === k ? "bg-accent text-accent-ink" : "text-muted")}>
+              {label}
+            </button>
+          ))}
+        </div>
+        <button onClick={() => selected !== null && remove(selected)} aria-label="Eliminar junta" className="grid size-11 place-items-center rounded-full bg-err text-white shadow-lg">
           <Trash2 className="size-5" />
         </button>
       </div>

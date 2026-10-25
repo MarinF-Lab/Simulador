@@ -10,6 +10,7 @@ import { brightness } from "../core/electrical/analyze";
 import { ROTORS } from "../core/mechanical/axes";
 import { useUI } from "../store/ui";
 import { Belts } from "./Mechanical";
+import { Joints } from "./Structure";
 
 const Q = Math.PI / 2;
 
@@ -122,7 +123,8 @@ export function Scene() {
   const sel = parts.find((p) => p.id === selected);
   const eflag = useProject((s) => s.circuit.flag);
   const mflag = useProject((s) => s.mech.flag);
-  const flag = useMemo(() => ({ ...mflag, ...eflag }), [eflag, mflag]);
+  const sflag = useProject((s) => s.structure.flag);
+  const flag = useMemo(() => ({ ...sflag, ...mflag, ...eflag }), [eflag, mflag, sflag]);
   return (
     <Canvas
       shadows
@@ -147,6 +149,7 @@ export function Scene() {
       <CableEnds />
       <BendHandle />
       <Belts />
+      <Joints />
       <FlowTicker />
       <Controller />
     </Canvas>

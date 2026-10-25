@@ -1,6 +1,6 @@
 // Historial de deshacer y rehacer basado en comandos. Puro, sin React.
 
-import type { Belt, Cable, Part, Project, PropValue } from "../model/project";
+import type { Belt, Cable, Joint, Part, Project, PropValue } from "../model/project";
 
 /** Cambios a una pieza. Una propiedad en `undefined` se borra. */
 export type Patch = Partial<Omit<Part, "id" | "props">> & { props?: Record<string, PropValue | undefined> };
@@ -15,6 +15,9 @@ export type Command =
   | { kind: "addBelt"; belt: Belt }
   | { kind: "removeBelt"; belt: Belt; index: number }
   | { kind: "updateBelt"; id: number; before: boolean; after: boolean }
+  | { kind: "addJoint"; joint: Joint }
+  | { kind: "removeJoint"; joint: Joint; index: number }
+  | { kind: "updateJoint"; id: number; before: Joint["kind"]; after: Joint["kind"] }
   /** Varias acciones que se deshacen juntas. */
   | { kind: "batch"; cmds: Command[] };
 
@@ -67,6 +70,12 @@ export function apply(p: Project, c: Command): Project {
       return { ...p, belts: (p.belts ?? []).filter((x) => x.id !== c.belt.id) };
     case "updateBelt":
       return { ...p, belts: (p.belts ?? []).map((x) => (x.id === c.id ? { ...x, cross: c.after } : x)) };
+    case "addJoint":
+      return { ...p, joints: [...(p.joints ?? []), c.joint], nextId: Math.max(p.nextId, c.joint.id + 1) };
+    case "removeJoint":
+      return { ...p, joints: (p.joints ?? []).filter((x) => x.id !== c.joint.id) };
+    case "updateJoint":
+      return { ...p, joints: (p.joints ?? []).map((x) => (x.id === c.id ? { ...x, kind: c.after } : x)) };
     case "batch":
       return c.cmds.reduce(apply, p);
   }
@@ -93,6 +102,12 @@ function unapply(p: Project, c: Command): Project {
       return { ...p, belts: insertAt(p.belts ?? [], c.belt, c.index) };
     case "updateBelt":
       return apply(p, { kind: "updateBelt", id: c.id, before: c.after, after: c.before });
+    case "addJoint":
+      return apply(p, { kind: "removeJoint", joint: c.joint, index: -1 });
+    case "removeJoint":
+      return { ...p, joints: insertAt(p.joints ?? [], c.joint, c.index) };
+    case "updateJoint":
+      return apply(p, { kind: "updateJoint", id: c.id, before: c.after, after: c.before });
     case "batch":
       return [...c.cmds].reverse().reduce(unapply, p);
   }

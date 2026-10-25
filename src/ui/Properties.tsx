@@ -380,6 +380,36 @@ function BeltPanel({ id }: { id: number }) {
   );
 }
 
+function JointPanel({ id }: { id: number }) {
+  const joint = useProject((s) => (s.project.joints ?? []).find((j) => j.id === id));
+  const parts = useProject((s) => s.project.parts);
+  const { remove, setJointKind } = useProject();
+  if (!joint) return null;
+  const nm = (pid: number) => { const p = parts.find((x) => x.id === pid); const it = p && findItem(p.type); return it ? `${it.name}${it.variant ? ` ${it.variant}` : ""}` : "—"; };
+  return (
+    <>
+      <div className="flex items-center gap-3 rounded-xl border border-line bg-panel-2/60 p-3">
+        <PartIcon kind={joint.kind === "revolute" ? "joint" : "bolt"} className="size-10 text-ink/85" />
+        <div className="min-w-0 flex-1">
+          <p className="font-semibold">{joint.kind === "revolute" ? "Junta rotacional" : "Unión fija"}</p>
+          <p className="text-xs text-muted">Une {nm(joint.a.part).toLowerCase()} con {nm(joint.b.part).toLowerCase()}</p>
+        </div>
+        <button onClick={() => remove(id)} aria-label="Eliminar junta" className="grid size-11 place-items-center rounded-lg text-muted hover:bg-panel hover:text-err">
+          <Trash2 className="size-5" />
+        </button>
+      </div>
+      <div className="flex gap-2">
+        {(["revolute", "fixed"] as const).map((k) => (
+          <button key={k} onClick={() => setJointKind(id, k)} aria-pressed={joint.kind === k} className={"min-h-11 flex-1 rounded-lg border px-3 text-sm font-medium " + (joint.kind === k ? "border-accent bg-accent text-accent-ink" : "border-line")}>
+            {k === "revolute" ? "Rotacional (gira)" : "Fija (perno)"}
+          </button>
+        ))}
+      </div>
+      <ComponentStatus id={id} />
+    </>
+  );
+}
+
 function CablePanel({ id }: { id: number }) {
   const project = useProject((s) => s.project);
   const circuit = useProject((s) => s.circuit);
@@ -420,12 +450,14 @@ export function Properties() {
   const part = useProject((s) => s.project.parts.find((p) => p.id === s.selected));
   const isCable = useProject((s) => s.project.cables.some((c) => c.id === s.selected));
   const isBelt = useProject((s) => (s.project.belts ?? []).some((b) => b.id === s.selected));
+  const isJoint = useProject((s) => (s.project.joints ?? []).some((j) => j.id === s.selected));
   const { remove, replace, actuate } = useProject();
   const item = part ? findItem(part.type) : undefined;
 
   const body = (() => {
     if (isCable && selected !== null) return <CablePanel id={selected} />;
     if (isBelt && selected !== null) return <BeltPanel id={selected} />;
+    if (isJoint && selected !== null) return <JointPanel id={selected} />;
     if (!part || !item) {
       return <p className="px-1 text-sm text-muted">Toca una pieza o un cable de la mesa para ver sus lecturas y cambiar sus propiedades. Para unir dos bornes, tócalos uno después del otro.</p>;
     }

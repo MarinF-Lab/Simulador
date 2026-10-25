@@ -45,10 +45,19 @@ export interface Belt {
   cross: boolean;
 }
 
+/** Junta entre dos agujeros alineados: rotacional (gira) o fija (perno). */
+export interface Joint {
+  id: number;
+  kind: "revolute" | "fixed";
+  a: { part: number; h: number };
+  b: { part: number; h: number };
+}
+
 export interface Project {
   parts: Part[];
   cables: Cable[];
   belts?: Belt[];
+  joints?: Joint[];
   /** Contador compartido: piezas y cables nunca repiten id. */
   nextId: number;
 }

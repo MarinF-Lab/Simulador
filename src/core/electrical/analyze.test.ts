@@ -69,6 +69,17 @@ describe("avisos", () => {
     expect(Math.abs(pressed.readings[lamp2.id]!.v)).toBeGreaterThan(8.9);
   });
 
+  it("con dos circuitos, avisa el abierto aunque el otro funcione", () => {
+    const a = loop(P("source", 0, 0), P("lamp", 200, 0, { vn: 9 }));
+    const sw = P("switch", 200, 400, { closed: false });
+    const b = loop(P("source", 0, 400), sw, P("lamp", 200, 600));
+    const c = analyze({ parts: [...a.parts, ...b.parts], cables: [...a.cables, ...b.cables], nextId: nid });
+    const open = c.issues.filter((i) => i.h === "Circuito abierto");
+    expect(open).toHaveLength(1);
+    expect(open[0]!.ids).toEqual([sw.id]);
+    expect(c.issues.some((i) => i.h === "Circula corriente")).toBe(true);
+  });
+
   it("LED invertido", () => {
     const bat = P("source", 0, 0), r = P("resistor", 200, 0, { r: 470 }), led = P("led", 200, 200);
     const c = analyze({ parts: [bat, r, led], cables: [W(bat, 1, r, 1), W(r, 0, led, 0), W(led, 1, bat, 0)], nextId: nid });

@@ -214,13 +214,26 @@ export function diagnose(d: DiagnoseInput): { issues: Issue[]; flag: Record<numb
   }
 
   const active = bats.filter((e) => Math.abs(rd(e.id).i) >= 1e-4);
-  if (bats.length && !shorted.length && !handled.size && !active.length) {
-    const openSw = elems.filter((e) => e.kind === "sw" && e.closed === false);
-    let t = "No circula corriente, así que ningún componente recibe voltaje. ";
+
+  // Circuito abierto, revisado por cada circuito por separado: piezas unidas por cables
+  // o por sus propios bornes forman un mismo circuito.
+  const net = occ.map((_, i) => i);
+  const fn = (n: number): number => (net[n] === n ? n : (net[n] = fn(net[n]!)));
+  for (const w of d.wires) net[fn(w.a)] = fn(w.b);
+  for (const e of elems) net[fn(e.a)] = fn(e.b);
+  const circuits = new Map<number, Elem[]>();
+  for (const e of elems) circuits.set(fn(e.a), [...(circuits.get(fn(e.a)) ?? []), e]);
+  for (const group of circuits.values()) {
+    const gb = group.filter((e) => e.kind === "bat");
+    if (!gb.length) continue;
+    if (gb.some((e) => shorted.includes(e) || handled.has(e.id) || Math.abs(rd(e.id).i) >= 1e-4)) continue;
+    const openSw = group.filter((e) => e.kind === "sw" && e.closed === false);
+    const who = circuits.size > 1 ? `En el circuito de ${gb[0]!.name.replace(/^La /, "la ")} no circula corriente` : "No circula corriente";
+    let t = `${who}, así que sus componentes no reciben voltaje. `;
     if (openSw.length) t += "Hay un interruptor abierto o un sensor sin presionar: acciónalo con el botón que aparece sobre la pieza.";
-    else if (elems.some((e) => e.burned)) t += "Un componente quemado dejó el camino cortado.";
+    else if (group.some((e) => e.burned)) t += "Un componente quemado dejó el camino cortado.";
     else t += "Revisa que exista un camino cerrado desde el + de la pila, pasando por los componentes, hasta su −.";
-    issues.push({ s: "warn", h: "Circuito abierto", t, ids: openSw.map((e) => e.id) });
+    issues.push({ s: "warn", h: "Circuito abierto", t, ids: openSw.length ? openSw.map((e) => e.id) : gb.map((e) => e.id) });
     openSw.forEach((e) => mark(e.id, "warn"));
   }
 

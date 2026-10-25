@@ -94,7 +94,7 @@ export function Workspace() {
       </Suspense>
 
       <div ref={(el) => { overlay.partTools = el; }} hidden className="absolute top-0 left-0 z-10 flex gap-2">
-        {type && POLAR.has(type) && (
+        {!running && type && POLAR.has(type) && (
           <button onClick={() => selected !== null && flip(selected)} className="flex min-h-11 items-center gap-1.5 rounded-full border border-line bg-panel px-4 text-sm font-semibold text-ink shadow-lg">
             <ArrowLeftRight className="size-4" aria-hidden="true" /> {type === "dcmotor" ? "Invertir giro" : "Invertir polaridad"}
           </button>
@@ -108,12 +108,16 @@ export function Workspace() {
             <act.Icon className="size-4" aria-hidden="true" /> {act.label}
           </button>
         )}
-        <button onClick={() => selected !== null && rotate(selected)} aria-label="Girar 90°" className="grid size-11 place-items-center rounded-full bg-accent text-accent-ink shadow-lg">
-          <RotateCw className="size-5" />
-        </button>
-        <button onClick={() => selected !== null && remove(selected)} aria-label="Eliminar pieza" className="grid size-11 place-items-center rounded-full bg-err text-white shadow-lg">
-          <Trash2 className="size-5" />
-        </button>
+        {!running && (
+          <>
+            <button onClick={() => selected !== null && rotate(selected)} aria-label="Girar 90°" className="grid size-11 place-items-center rounded-full bg-accent text-accent-ink shadow-lg">
+              <RotateCw className="size-5" />
+            </button>
+            <button onClick={() => selected !== null && remove(selected)} aria-label="Eliminar pieza" className="grid size-11 place-items-center rounded-full bg-err text-white shadow-lg">
+              <Trash2 className="size-5" />
+            </button>
+          </>
+        )}
       </div>
 
       <div ref={(el) => { overlay.cableTools = el; }} hidden className="absolute top-0 left-0 z-10 flex items-center gap-2">

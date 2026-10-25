@@ -123,17 +123,27 @@ function sample(): Project {
   const sw = P(2, "switch", -90, 130);
   const res = P(3, "resistor", 30, 130, 0, { r: 100 });
   const lamp = P(4, "lamp", 60, 10, 0, { vn: 6 });
-  // Tren 10 → 40 con correa, movido por un motor de 12 V (como el ejemplo del prototipo).
-  const bat2 = P(13, "source", 120, 150, 0, { v: 12 });
-  const motor: Part = { id: 14, type: "dcmotor", x: 140, y: 60, z: 30, rot: [0, 0, 0], props: { rpm: 120 } };
-  const g10: Part = { id: 15, type: "gear10", x: 165, y: 60, z: 33, rot: [0, 1, 0], props: {} };
-  const g40: Part = { id: 16, type: "gear40", x: 165, y: 110, z: 3, rot: [0, 1, 0], props: {} };
-  const pS: Part = { id: 17, type: "pulleyS", x: 175, y: 110, z: 35, rot: [0, 1, 0], props: {} };
-  const pL: Part = { id: 18, type: "pulleyL", x: 175, y: 220, z: 17, rot: [0, 1, 0], props: {} };
-  const parts = [bat, sw, res, lamp, P(8, "profile240", -60, -80), bat2, motor, g10, g40, pS, pL];
+  // Motor de pie sobre una placa: en su eje, un engranaje de 10 que mueve uno de 40 y un brazo
+  // de dos tramos (eslabón y perfil) unidos por juntas rotacionales.
+  const plate = P(13, "plate", 200, -40, 0, { lx: 200, ly: 160 });
+  const motor: Part = { id: 14, type: "dcmotor", x: 180, y: -40, z: 6, rot: [0, 3, 0], props: { rpm: 30, torque: 0.8, vnom: 12 } };
+  const g10: Part = { id: 15, type: "gear10", x: 180, y: -40, z: 57, rot: [0, 0, 0], props: {} };
+  const axle: Part = { id: 16, type: "shaft", x: 230, y: -40, z: 6, rot: [0, 3, 0], props: { lx: 60 } };
+  const g40: Part = { id: 17, type: "gear40", x: 230, y: -40, z: 57, rot: [0, 0, 0], props: {} };
+  const link: Part = { id: 18, type: "link", x: 203, y: -40, z: 66, rot: [0, 0, 0], props: { lx: 60 } };
+  const arm: Part = { id: 19, type: "profile60", x: 251, y: -40, z: 72, rot: [0, 0, 0], props: {} };
+  const bat2 = P(20, "source", 70, -120, 0, { v: 12 });
+  const parts = [bat, sw, res, lamp, P(8, "profile240", -60, -80), plate, motor, g10, axle, g40, link, arm, bat2];
   const cables = [wire(9, bat, 1, sw, 0), wire(10, sw, 1, res, 0), wire(11, res, 1, lamp, 1), wire(12, lamp, 0, bat, 0),
-    wire(19, bat2, 1, motor, 1), wire(20, motor, 0, bat2, 0)];
-  return { parts, cables, belts: [{ id: 21, a: 17, b: 18, cross: false }], nextId: 22 };
+    wire(21, bat2, 1, motor, 1), wire(22, motor, 0, bat2, 0)];
+  const base: Project = { parts, cables, belts: [], nextId: 23 };
+  // Juntas: el eslabón en el eje del motor y el perfil sobre el otro extremo del eslabón.
+  const onShaft = alignedPairs(base, 18).find((q) => q.shaft);
+  const elbow = alignedPairs(base, 19).find((q) => q.b.part === 18);
+  const joints: Joint[] = [];
+  if (onShaft) joints.push({ id: 23, kind: "revolute", a: onShaft.a, b: onShaft.b });
+  if (elbow) joints.push({ id: 24, kind: "revolute", a: elbow.a, b: elbow.b });
+  return { ...base, joints, nextId: 25 };
 }
 
 export const useProject = create<ProjectState>((set, get) => {

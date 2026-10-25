@@ -5,6 +5,7 @@ import { bounds, extent, TABLE, type Cable, type Vec3 } from "../core/model/proj
 import { endPos, TERMINALS, termWorld } from "../core/model/terminals";
 import { snap } from "../core/model/units";
 import { useProject, type TermRef } from "../store/project";
+import { useUI } from "../store/ui";
 import { shapeOf, type CableShape } from "../core/history/commands";
 import { cableMid } from "./cableCurve";
 import { holeAt } from "../core/model/holes";
@@ -318,7 +319,12 @@ export function Controller() {
         drag.current = { kind: "orbit", pid: e.pointerId, lx: e.clientX, ly: e.clientY };
         return;
       }
-      const hit = hitAny(e.clientX, e.clientY);
+      let hit = hitAny(e.clientX, e.clientY);
+      // Durante la simulación no se edita: tocar solo selecciona (para ver lecturas o accionar).
+      if (useUI.getState().running && hit && hit.kind !== "cable" && hit.kind !== "belt") {
+        const id = hit.kind === "term" ? hit.ref.part : hit.kind === "end" || hit.kind === "bend" || hit.kind === "joint" || hit.kind === "part" ? hit.id : null;
+        hit = id !== null ? { kind: "cable", id } : null;
+      }
       const g = ground(e.clientX, e.clientY);
       const base = { pid: e.pointerId, sx: e.clientX, sy: e.clientY, moved: false };
       const st = P();

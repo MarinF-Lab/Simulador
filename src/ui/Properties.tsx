@@ -11,6 +11,7 @@ import { useUI } from "../store/ui";
 import { PartIcon } from "./PartIcon";
 import { sectionsFor, type Field } from "./propertySchema";
 import { useIssues } from "./useIssues";
+import { useSim } from "../store/sim";
 import { isRotor } from "../core/mechanical/axes";
 
 const inputCls =
@@ -333,14 +334,18 @@ function Motion({ id }: { id: number }) {
 }
 
 function MotorSpeed({ id }: { id: number }) {
-  const w = useProject((s) => s.mech.rpm[id] ?? 0);
+  const design = useProject((s) => s.mech.rpm[id] ?? 0);
+  const live = useSim((s) => s.status?.motors[id]);
+  const w = live?.rpm ?? design;
   return (
     <section className="rounded-xl border border-line px-3 py-2">
-      <h3 className="pb-2 text-xs font-semibold tracking-widest text-muted uppercase">Giro del eje</h3>
+      <h3 className="pb-2 text-xs font-semibold tracking-widest text-muted uppercase">Giro del eje{live ? " (simulación)" : ""}</h3>
       <div className="grid grid-cols-3 gap-2 pb-1">
         <Cell k="Velocidad" v={fmtRpm(w)} big />
         <Cell k="Sentido" v={turn(w)} />
+        {live ? <Cell k="Par" v={`${fmt(live.torque)} N·m`} /> : <Cell k="Carga" v="en vacío" />}
       </div>
+      {live && <p className="pb-1 text-xs text-muted">Corriente con carga: {fmtA(live.current)}. Al frenar el motor, sube la corriente.</p>}
     </section>
   );
 }

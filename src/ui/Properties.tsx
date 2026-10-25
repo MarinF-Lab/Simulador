@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ChevronDown, ChevronUp, RotateCw, Trash2 } from "lucide-react";
 import { brightness, ELEC_DEFAULTS } from "../core/electrical/analyze";
 import type { Issue } from "../core/electrical/circuit";
@@ -12,6 +12,7 @@ import { PartIcon } from "./PartIcon";
 import { sectionsFor, type Field } from "./propertySchema";
 import { useIssues } from "./useIssues";
 import { useSim } from "../store/sim";
+import { holeAt } from "../core/model/holes";
 import { isRotor } from "../core/mechanical/axes";
 
 const inputCls =
@@ -190,6 +191,21 @@ function SizeEditor({ id }: { id: number }) {
   );
 }
 
+/** Recuadro plegable "¿Qué es?" con la descripción de la pieza. */
+function WhatIsIt({ desc }: { desc: string }) {
+  const open = useUI((s) => s.showInfo);
+  const setOpen = useUI((s) => s.setShowInfo);
+  return (
+    <section className="rounded-xl border border-accent/30 bg-accent/10 px-3 py-2">
+      <button onClick={() => setOpen(!open)} aria-expanded={open} className="flex min-h-9 w-full items-center justify-between text-left text-xs font-semibold tracking-widest text-ink/80 uppercase">
+        ¿Qué es?
+        <ChevronDown className={"size-4 transition-transform " + (open ? "" : "-rotate-90")} aria-hidden="true" />
+      </button>
+      {open && <p className="pb-1 text-sm leading-snug text-ink/90">{desc}</p>}
+    </section>
+  );
+}
+
 function Placement({ id }: { id: number }) {
   const part = useProject((s) => s.project.parts.find((p) => p.id === id));
   const { setZ, rotate, rotAxis, setRotAxis } = useProject();
@@ -333,6 +349,87 @@ function Motion({ id }: { id: number }) {
   );
 }
 
+/** Deslizadores θ: uno por servo del proyecto. Mueven el mecanismo en vivo al simular. */
+function ServoSliders() {
+  const parts = useProject((s) => s.project.parts);
+  const servos = useMemo(() => parts.filter((p) => p.type === "servo"), [parts]);
+  const setProp = useProject((s) => s.setProp);
+  const live = useSim((s) => s.status?.motors);
+  if (!servos.length) return null;
+  return (
+    <section className="rounded-xl border border-line px-3 py-2">
+      <h3 className="pb-1 text-xs font-semibold tracking-widest text-muted uppercase">Brazo · articulaciones</h3>
+      {servos.map((sv, i) => {
+        const amin = typeof sv.props.amin === "number" ? sv.props.amin : -90;
+        const amax = typeof sv.props.amax === "number" ? sv.props.amax : 90;
+        const t = typeof sv.props.target === "number" ? sv.props.target : 0;
+        const now = live?.[sv.id]?.angle;
+        return (
+          <div key={sv.id} className="flex flex-col gap-1 py-1.5 text-sm">
+            <div className="flex items-center justify-between gap-3">
+              <label htmlFor={`theta-${sv.id}`}>θ{i + 1} · servo n.º {sv.id}</label>
+              <span className="font-mono tabular-nums">
+                {fmt(t)}°{now !== undefined && <span className="text-muted"> (ahora {fmt(now)}°)</span>}
+              </span>
+            </div>
+            <input id={`theta-${sv.id}`} type="range" min={amin} max={amax} step={1} value={t} onChange={(e) => setProp(sv.id, "target", +e.target.value)} className="h-8 w-full accent-[var(--color-accent)]" />
+          </div>
+        );
+      })}
+      <p className="pb-1 text-xs text-muted">Toca Iniciar y mueve los deslizadores: cada servo va a su ángulo.</p>
+    </section>
+  );
+}
+
+/** Lecturas de servo, paso a paso, actuador lineal y sensor de ángulo durante la simulación. */
+function ActuatorReadings({ id, type }: { id: number; type: string }) {
+  const live = useSim((s) => s.status?.motors[id]);
+  const angles = useSim((s) => s.status?.jointAngle);
+  const joints = useProject((s) => s.project.joints);
+  const parts = useProject((s) => s.project.parts);
+  const running = useUI((s) => s.running);
+  if (type === "sensorAngle") {
+    // El sensor mide la junta rotacional sobre la que está montado (la más cercana).
+    const me = parts.find((p) => p.id === id)!;
+    let best: { id: number; d: number } | null = null;
+    for (const j of joints ?? []) {
+      if (j.kind !== "revolute") continue;
+      const h = holeAt({ parts }, j.a);
+      if (!h) continue;
+      const d = Math.hypot(h.p[0] - me.x, h.p[1] - me.y);
+      if (d < 30 && (!best || d < best.d)) best = { id: j.id, d };
+    }
+    const a = best && angles?.[best.id];
+    return (
+      <section className="rounded-xl border border-line px-3 py-2">
+        <h3 className="pb-2 text-xs font-semibold tracking-widest text-muted uppercase">Lectura</h3>
+        <div className="grid grid-cols-3 gap-2 pb-1">
+          <Cell k="Ángulo" v={a !== undefined && a !== null ? `${fmt(a)}°` : running ? "—" : "0°"} big />
+          <Cell k="Junta" v={best ? `n.º ${best.id}` : "ninguna"} />
+        </div>
+        {!best && <p className="pb-1 text-xs text-muted">Ponlo junto a una junta rotacional (a menos de 30 mm) para medir su ángulo.</p>}
+      </section>
+    );
+  }
+  if (!running) return null;
+  return (
+    <section className="rounded-xl border border-line px-3 py-2">
+      <h3 className="pb-2 text-xs font-semibold tracking-widest text-muted uppercase">En la simulación</h3>
+      <div className="grid grid-cols-3 gap-2 pb-1">
+        {type === "linear" ? (
+          <Cell k="Vástago" v={live?.ext !== undefined ? `${fmt(live.ext)} mm` : "sin carga"} big />
+        ) : (
+          <>
+            <Cell k="Ángulo" v={live?.angle !== undefined ? `${fmt(live.angle)}°` : "—"} big />
+            <Cell k="Velocidad" v={live ? fmtRpm(live.rpm) : "—"} />
+          </>
+        )}
+      </div>
+      {!live && <p className="pb-1 text-xs text-muted">Monta una pieza en su {type === "linear" ? "vástago" : "eje"} para que la mueva.</p>}
+    </section>
+  );
+}
+
 function MotorSpeed({ id }: { id: number }) {
   const design = useProject((s) => s.mech.rpm[id] ?? 0);
   const live = useSim((s) => s.status?.motors[id]);
@@ -369,6 +466,7 @@ function BeltPanel({ id }: { id: number }) {
           <Trash2 className="size-5" />
         </button>
       </div>
+      <WhatIsIt desc={findItem("belt")!.desc} />
       <section className="rounded-xl border border-line px-3 py-2">
         <h3 className="pb-2 text-xs font-semibold tracking-widest text-muted uppercase">Lecturas</h3>
         <div className="grid grid-cols-3 gap-2 pb-1">
@@ -403,6 +501,7 @@ function JointPanel({ id }: { id: number }) {
           <Trash2 className="size-5" />
         </button>
       </div>
+      <WhatIsIt desc={findItem(joint.kind === "revolute" ? "joint" : "bolt")!.desc.replace(/^Herramienta: /, "")} />
       <div className="flex gap-2">
         {(["revolute", "fixed"] as const).map((k) => (
           <button key={k} onClick={() => setJointKind(id, k)} aria-pressed={joint.kind === k} className={"min-h-11 flex-1 rounded-lg border px-3 text-sm font-medium " + (joint.kind === k ? "border-accent bg-accent text-accent-ink" : "border-line")}>
@@ -436,6 +535,7 @@ function CablePanel({ id }: { id: number }) {
           <Trash2 className="size-5" />
         </button>
       </div>
+      <WhatIsIt desc={findItem("wire")!.desc} />
       <section className="rounded-xl border border-line px-3 py-2">
         <h3 className="pb-2 text-xs font-semibold tracking-widest text-muted uppercase">Lecturas</h3>
         <div className="grid grid-cols-3 gap-2 pb-1">
@@ -482,6 +582,8 @@ export function Properties() {
           </button>
         </div>
 
+        <WhatIsIt desc={item.desc} />
+
         {burned && (
           <div className="flex items-center gap-3 rounded-xl border border-err/50 bg-err/10 p-3 text-sm">
             <p className="flex-1">Esta pieza se quemó. Corrige el circuito y reemplázala.</p>
@@ -491,6 +593,8 @@ export function Properties() {
 
         <Readings id={part.id} type={part.type} />
         {part.type === "dcmotor" && <MotorSpeed id={part.id} />}
+        {(part.type === "servo" || part.type === "stepper" || part.type === "linear" || part.type === "sensorAngle") && <ActuatorReadings id={part.id} type={part.type} />}
+        {part.type === "servo" && <ServoSliders />}
         {isRotor(part.type) && <Motion id={part.id} />}
 
         {(part.type === "switch" || part.type === "sensorContact") && (

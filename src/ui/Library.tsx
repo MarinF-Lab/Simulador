@@ -7,7 +7,7 @@ import { PartIcon } from "./PartIcon";
 import { startPaletteGesture } from "./paletteDrag";
 
 export function Library() {
-  const { search, setSearch, collapsed, toggleCategory } = useUI();
+  const { search, setSearch, collapsed, toggleCategory, showDesc, setShowDesc } = useUI();
   const items = searchCatalog(search);
   const searching = search.trim() !== "";
 
@@ -33,6 +33,19 @@ export function Library() {
         </label>
       </div>
 
+      <div className="flex items-center justify-between px-3 pb-2 text-sm">
+        <span id="lib-desc-label" className="text-muted">Ver descripciones</span>
+        <button
+          role="switch"
+          aria-checked={showDesc}
+          aria-labelledby="lib-desc-label"
+          onClick={() => setShowDesc(!showDesc)}
+          className={"relative h-7 w-12 rounded-full transition-colors " + (showDesc ? "bg-accent" : "bg-line")}
+        >
+          <span className={"absolute top-1 size-5 rounded-full bg-white transition-all " + (showDesc ? "left-6" : "left-1")} />
+        </button>
+      </div>
+
       <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-4">
         {CATEGORIES.map((cat) => {
           const list = items.filter((i) => i.category === cat.id);
@@ -52,7 +65,7 @@ export function Library() {
                 </span>
               </button>
               {open && (
-                <div className="grid grid-cols-3 gap-2 pb-3">
+                <div className={showDesc ? "flex flex-col gap-2 pb-3" : "grid grid-cols-3 gap-2 pb-3"}>
                   {list.map((it) => (
                     <button
                       key={it.id}
@@ -66,11 +79,24 @@ export function Library() {
                       }}
                       onContextMenu={(e) => e.preventDefault()}
                       aria-label={`Agregar ${it.name.toLowerCase()}${it.variant ? ` ${it.variant}` : ""} a la mesa`}
-                      className="flex min-h-[88px] touch-pan-y flex-col items-center justify-center gap-1 rounded-lg border border-line bg-panel-2/60 px-1 py-2 text-center text-xs leading-tight text-ink select-none hover:border-accent/60 [-webkit-touch-callout:none]"
+                      className={
+                        "flex touch-pan-y rounded-lg border border-line bg-panel-2/60 text-ink select-none hover:border-accent/60 [-webkit-touch-callout:none] " +
+                        (showDesc ? "min-h-[64px] items-start gap-3 px-3 py-2 text-left text-sm" : "min-h-[88px] flex-col items-center justify-center gap-1 px-1 py-2 text-center text-xs leading-tight")
+                      }
                     >
-                      <PartIcon kind={it.kind} className="size-9 text-ink/85" />
-                      <span className="font-medium">{it.name}</span>
-                      {it.variant && <span className="text-[11px] text-muted">{it.variant}</span>}
+                      <PartIcon kind={it.kind} className={showDesc ? "mt-0.5 size-9 shrink-0 text-ink/85" : "size-9 text-ink/85"} />
+                      {showDesc ? (
+                        <span className="min-w-0">
+                          <span className="font-medium">{it.name}</span>
+                          {it.variant && <span className="text-muted"> · {it.variant}</span>}
+                          <span className="block text-xs leading-snug text-muted">{it.desc}</span>
+                        </span>
+                      ) : (
+                        <>
+                          <span className="font-medium">{it.name}</span>
+                          {it.variant && <span className="text-[11px] text-muted">{it.variant}</span>}
+                        </>
+                      )}
                     </button>
                   ))}
                 </div>

@@ -1,9 +1,10 @@
 // Bornes de las piezas eléctricas. El borne 0 es el − y el borne 1 es el +.
+// El puente H tiene 4: entrada − y + (0 y 1) y salida A y B (2 y 3).
 // Posiciones locales en mm, medidas desde el centro de la caja de la pieza sin girar.
 
 import { extent, rotateLocal, type Cable, type CableEnd, type Part, type Project, type Vec3 } from "./project";
 
-export const TERMINALS: Record<string, [Vec3, Vec3]> = {
+export const TERMINALS: Record<string, Vec3[]> = {
   source: [[-15, 9, 19], [10, 9, 19]],
   resistor: [[-20, 0, 0], [20, 0, 0]],
   lamp: [[-13, 0, -20], [13, 0, -20]],
@@ -12,6 +13,10 @@ export const TERMINALS: Record<string, [Vec3, Vec3]> = {
   meter: [[-10, -10, -20], [10, -10, -20]],
   dcmotor: [[-24, -7, 15], [-24, 7, 15]],
   sensorContact: [[-10, 0, -3], [10, 0, -3]],
+  servo: [[-20, -5, -12], [-20, 5, -12]],
+  stepper: [[-21, -8, -15], [-21, 8, -15]],
+  linear: [[-60, -6, 4], [-60, 6, 4]],
+  hbridge: [[-25, -10, -5], [-25, 10, -5], [25, -10, -5], [25, 10, -5]],
 };
 
 /** Piezas con polaridad: su borne + se marca en rojo. */

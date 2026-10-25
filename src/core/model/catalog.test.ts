@@ -8,6 +8,9 @@ describe("catálogo", () => {
     const cats = new Set(CATEGORIES.map((c) => c.id));
     expect(CATALOG.every((i) => cats.has(i.category))).toBe(true);
   });
+  it("cada pieza tiene una descripción", () => {
+    expect(CATALOG.every((i) => i.desc.length > 20)).toBe(true);
+  });
   it("busca sin importar tildes ni mayúsculas", () => {
     expect(searchCatalog("lampara").map((i) => i.id)).toEqual(["lamp"]);
     expect(searchCatalog("ARTICULACION").map((i) => i.id)).toEqual(["joint"]);

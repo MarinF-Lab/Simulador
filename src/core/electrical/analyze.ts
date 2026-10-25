@@ -8,6 +8,7 @@ import { diagnose, simulate, type Elem, type ElemKind, type Issue, type Reading,
 
 const KIND: Record<string, ElemKind> = {
   source: "bat", resistor: "res", switch: "sw", sensorContact: "sw", lamp: "bulb", dcmotor: "motor", led: "led", meter: "meter",
+  servo: "motor", stepper: "motor", linear: "motor",
 };
 
 /** Valores por defecto de las piezas eléctricas. Los usa también el panel de Propiedades. */
@@ -27,6 +28,10 @@ export function elemName(type: string, props: Record<string, unknown>): string {
     case "led": return "El LED";
     case "switch": return "El interruptor";
     case "sensorContact": return "El sensor de contacto";
+    case "servo": return "El servo";
+    case "stepper": return "El motor paso a paso";
+    case "linear": return "El actuador lineal";
+    case "hbridge": return "El puente H";
     case "dcmotor": return "El motor";
     case "meter": return "El voltímetro";
     default: return findItem(type)?.name ?? "La pieza";
@@ -55,6 +60,18 @@ export function analyze(project: Project): Circuit {
   };
   const elems: Elem[] = [];
   for (const part of project.parts) {
+    // Puente H: la entrada es una carga de 1 kΩ y la salida, una fuente que copia el voltaje de
+    // entrada con el signo del sentido elegido (Adelante +1, Atrás −1, Freno 0).
+    if (part.type === "hbridge") {
+      const n = [0, 1, 2, 3].map((t) => node(posKey(termWorld(part, t))));
+      n.forEach((x) => occ[x]!++);
+      const dir = part.props.dir;
+      const gain = dir === "Atrás" ? -1 : dir === "Freno" ? 0 : 1;
+      const name = elemName(part.type, part.props);
+      elems.push({ id: -part.id, kind: "res", a: n[0]!, b: n[1]!, r: 1000, name });
+      elems.push({ id: part.id, kind: "src", a: n[2]!, b: n[3]!, gain, ca: n[0]!, cb: n[1]!, name });
+      continue;
+    }
     const kind = KIND[part.type];
     if (!kind || !TERMINALS[part.type]) continue;
     const a = node(posKey(termWorld(part, 0))), b = node(posKey(termWorld(part, 1)));
@@ -64,7 +81,7 @@ export function analyze(project: Project): Circuit {
       id: part.id, kind, a, b, name: elemName(part.type, pr),
       v: num(pr.v, num(d.v, 9)),
       r: num(pr.r, num(d.r, 100)),
-      vn: kind === "motor" ? num(pr.vnom, 12) : num(pr.vn, num(d.vn, 6)),
+      vn: kind === "motor" ? num(pr.vnom, part.type === "servo" ? 6 : 12) : num(pr.vn, num(d.vn, 6)),
       vf: num(pr.vf, num(d.vf, 2)),
       // El sensor de contacto es un pulsador: cierra solo mientras está presionado.
       closed: part.type === "sensorContact" ? pr.pressed === true : pr.closed !== false,
@@ -102,7 +119,13 @@ export function analyze(project: Project): Circuit {
   }
   for (const w of wires) side[w.id] = pol.get(w.a) ?? pol.get(w.b) ?? null;
 
-  return { ...sim, issues, flag, side, occAt: (k) => occ[idx.get(k) ?? -1] ?? 0 };
+  // La entrada del puente H usa id negativo por dentro: los avisos se muestran en la pieza.
+  const fixedIssues = issues.map((i) => ({ ...i, ids: [...new Set(i.ids.map(Math.abs))] }));
+  const seen = new Set<string>();
+  const uniq = fixedIssues.filter((i) => { const k = i.h + i.t; if (seen.has(k)) return false; seen.add(k); return true; });
+  const fixedFlag: Record<number, "err" | "warn"> = {};
+  for (const [id, f] of Object.entries(flag)) { const k = Math.abs(+id); if (fixedFlag[k] !== "err") fixedFlag[k] = f; }
+  return { ...sim, issues: uniq, flag: fixedFlag, side, occAt: (k) => occ[idx.get(k) ?? -1] ?? 0 };
 }
 
 /** Brillo de 0 a 1 de una ampolleta o un LED. */

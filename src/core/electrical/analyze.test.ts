@@ -80,6 +80,17 @@ describe("avisos", () => {
     expect(c.issues.some((i) => i.h === "Circula corriente")).toBe(true);
   });
 
+  it("puente H: Adelante, Atrás y Freno cambian el voltaje en la salida", () => {
+    const run = (dir: string) => {
+      const bat = P("source", 0, 0, { v: 12 }), hb = P("hbridge", 200, 0, { dir }), lamp = P("lamp", 400, 0, { vn: 12 });
+      const c = analyze({ parts: [bat, hb, lamp], cables: [W(bat, 0, hb, 0), W(bat, 1, hb, 1), W(hb, 2, lamp, 0), W(hb, 3, lamp, 1)], nextId: nid });
+      return c.readings[lamp.id]!.v;
+    };
+    expect(run("Adelante")).toBeGreaterThan(11);
+    expect(run("Atrás")).toBeLessThan(-11);
+    expect(Math.abs(run("Freno"))).toBeLessThan(0.01);
+  });
+
   it("LED invertido", () => {
     const bat = P("source", 0, 0), r = P("resistor", 200, 0, { r: 470 }), led = P("led", 200, 200);
     const c = analyze({ parts: [bat, r, led], cables: [W(bat, 1, r, 1), W(r, 0, led, 0), W(led, 1, bat, 0)], nextId: nid });

@@ -47,10 +47,13 @@ export function Workspace() {
   const counts = { err: issues.filter((i) => i.s === "err").length, warn: issues.filter((i) => i.s === "warn").length };
   const selected = useProject((s) => s.selected);
   const count = useProject((s) => s.project.parts.length);
+  const joints = useProject((s) => (s.project.joints ?? []).filter((j) => j.kind === "revolute").length);
   const type = useProject((s) => s.project.parts.find((p) => p.id === s.selected)?.type);
   const { rotate, remove, cableMode, setCableMode, actuate, flip } = useProject();
   const selProps = useProject((s) => s.project.parts.find((p) => p.id === s.selected)?.props);
-  const act = type === "switch"
+  const act = type === "hbridge"
+    ? { label: `Sentido: ${typeof selProps?.dir === "string" ? selProps.dir : "Adelante"}`, on: selProps?.dir !== "Freno", Icon: ArrowLeftRight }
+    : type === "switch"
     ? { label: selProps?.closed === false ? "Cerrar" : "Abrir", on: selProps?.closed !== false, Icon: Power }
     : type === "sensorContact"
       ? { label: selProps?.pressed === true ? "Soltar" : "Presionar", on: selProps?.pressed === true, Icon: Hand }
@@ -81,6 +84,8 @@ export function Workspace() {
         ? cableMode === "move"
           ? "Arrastra el cable para moverlo completo, o arrastra una punta hasta un borne."
           : "Arrastra el punto blanco para doblar el cable. Tócalo dos veces para dejarlo recto."
+      : type === "hbridge"
+        ? "Toca el botón de sentido para cambiar entre Adelante, Atrás y Freno. Entrada: la pila; salida: el motor."
       : act
         ? `Toca ${act.label} para accionar ${type === "switch" ? "el interruptor" : "el sensor"}. Arrástralo para moverlo o toca un borne para empezar un cable.`
       : item
@@ -102,6 +107,7 @@ export function Workspace() {
         {act && (
           <button
             onClick={() => selected !== null && actuate(selected)}
+            title={type === "hbridge" ? "Cambia entre Adelante, Atrás y Freno" : undefined}
             aria-pressed={act.on}
             className={"flex min-h-11 items-center gap-1.5 rounded-full px-4 text-sm font-semibold shadow-lg " + (act.on ? "bg-ok text-white" : "border border-line bg-panel text-ink")}
           >
@@ -213,7 +219,7 @@ export function Workspace() {
         <div className="hidden w-40 shrink-0 flex-col items-center gap-1 rounded-xl border border-line bg-panel/90 p-2 md:flex">
           {item ? <PartIcon kind={item.kind} className="size-12 text-ink/85" /> : <span className="size-12" />}
           <p className="text-center text-xs text-muted">{item ? `${item.name}${item.variant ? ` ${item.variant}` : ""}` : "Sin selección"}</p>
-          <p className="text-center font-mono text-[11px] text-muted">{count} pieza{count === 1 ? "" : "s"} en la mesa</p>
+          <p className="text-center font-mono text-[11px] text-muted">{count} pieza{count === 1 ? "" : "s"} · {joints} articulaci{joints === 1 ? "ón" : "ones"}</p>
         </div>
       </div>
     </div>

@@ -19,6 +19,8 @@ export interface CatalogItem {
   variant?: string;
   /** Palabras extra para el buscador. */
   tags?: string[];
+  /** Qué es y cómo se usa en KINETIC, en una o dos frases. */
+  desc: string;
 }
 
 export const CATEGORIES: { id: CategoryId; name: string }[] = [
@@ -30,42 +32,42 @@ export const CATEGORIES: { id: CategoryId; name: string }[] = [
 ];
 
 export const CATALOG: CatalogItem[] = [
-  { id: "source", name: "Pila", kind: "source", category: "electrical", variant: "0,5–24 V", tags: ["fuente", "batería", "bateria"] },
-  { id: "resistor", name: "Resistencia", kind: "resistor", category: "electrical" },
-  { id: "lamp", name: "Ampolleta", kind: "lamp", category: "electrical", tags: ["lámpara", "lampara", "foco"] },
-  { id: "led", name: "LED", kind: "led", category: "electrical", tags: ["diodo"] },
-  { id: "switch", name: "Interruptor", kind: "switch", category: "electrical" },
-  { id: "wire", name: "Cable", kind: "wire", category: "electrical" },
-  { id: "hbridge", name: "Puente H", kind: "hbridge", category: "electrical", tags: ["controlador", "driver"] },
+  { id: "source", name: "Pila", kind: "source", category: "electrical", variant: "0,5–24 V", tags: ["fuente", "batería", "bateria"], desc: "Da la energía al circuito. Tiene un borne + (rojo) y uno − (oscuro). Su voltaje se cambia en Propiedades, de 0,5 a 24 V." },
+  { id: "resistor", name: "Resistencia", kind: "resistor", category: "electrical", desc: "Limita la corriente que pasa por el circuito. Ponla en serie con un LED o una ampolleta para que no se quemen." },
+  { id: "lamp", name: "Ampolleta", kind: "lamp", category: "electrical", tags: ["lámpara", "lampara", "foco"], desc: "Se enciende cuando le llega voltaje y brilla más cuanto más cerca está de su voltaje nominal. Si recibe mucho más, se quema." },
+  { id: "led", name: "LED", kind: "led", category: "electrical", tags: ["diodo"], desc: "Luz que solo enciende en un sentido: su borne + (ánodo, rojo) debe ir hacia el + de la pila. Necesita una resistencia en serie, si no, se quema." },
+  { id: "switch", name: "Interruptor", kind: "switch", category: "electrical", desc: "Abre o cierra el paso de la corriente. Con el botón Abrir o Cerrar, sobre la pieza, apagas o enciendes lo que alimenta." },
+  { id: "wire", name: "Cable", kind: "wire", category: "electrical", desc: "Une dos bornes. También puedes crear cables tocando un borne y luego otro. Rojo es el lado +, azul el lado −." },
+  { id: "hbridge", name: "Puente H", kind: "hbridge", category: "electrical", tags: ["controlador", "driver"], desc: "Controla el sentido de un motor sin cambiar los cables. Entrada: la pila. Salida: el motor. Con su botón eliges Adelante, Atrás o Freno." },
 
-  { id: "dcmotor", name: "Motor DC", kind: "dcmotor", category: "motors" },
-  { id: "stepper", name: "Motor paso a paso", kind: "stepper", category: "motors", tags: ["stepper"] },
-  { id: "servo", name: "Servo", kind: "servo", category: "motors" },
-  { id: "linear", name: "Actuador lineal", kind: "linear", category: "motors", tags: ["pistón", "piston"] },
+  { id: "dcmotor", name: "Motor DC", kind: "dcmotor", category: "motors", desc: "Gira cuando recibe voltaje: más voltaje, más rápido. Monta un engranaje, una polea o un eslabón en la punta de su eje para que lo mueva." },
+  { id: "stepper", name: "Motor paso a paso", kind: "stepper", category: "motors", tags: ["stepper"], desc: "Motor que avanza en pasos fijos, por ejemplo 200 por vuelta. Sirve para girar a un ángulo exacto o a una velocidad constante." },
+  { id: "servo", name: "Servo", kind: "servo", category: "motors", desc: "Motor que va a un ángulo y se queda ahí, dentro de su ángulo mínimo y máximo. Se mueve con el deslizador θ en Propiedades." },
+  { id: "linear", name: "Actuador lineal", kind: "linear", category: "motors", tags: ["pistón", "piston"], desc: "Empuja o tira en línea recta: su vástago sale o entra según la polaridad. La distancia máxima es su carrera." },
 
-  { id: "shaft", name: "Eje", kind: "shaft", category: "mechanical" },
-  { id: "gear10", name: "Engranaje", kind: "gear", category: "mechanical", variant: "10 dientes" },
-  { id: "gear20", name: "Engranaje", kind: "gear", category: "mechanical", variant: "20 dientes" },
-  { id: "gear40", name: "Engranaje", kind: "gear", category: "mechanical", variant: "40 dientes" },
-  { id: "pulleyS", name: "Polea", kind: "pulley", category: "mechanical", variant: "S" },
-  { id: "pulleyM", name: "Polea", kind: "pulley", category: "mechanical", variant: "M" },
-  { id: "pulleyL", name: "Polea", kind: "pulley", category: "mechanical", variant: "L" },
-  { id: "belt", name: "Correa", kind: "belt", category: "mechanical", tags: ["liga", "banda"] },
-  { id: "bearing", name: "Rodamiento", kind: "bearing", category: "mechanical" },
-  { id: "support", name: "Soporte", kind: "support", category: "mechanical" },
-  { id: "link", name: "Eslabón", kind: "link", category: "mechanical", tags: ["biela", "brazo"] },
-  { id: "joint", name: "Junta rotacional", kind: "joint", category: "mechanical", tags: ["articulación", "bisagra"] },
+  { id: "shaft", name: "Eje", kind: "shaft", category: "mechanical", desc: "Barra donde se montan engranajes y poleas para que giren juntos. Lo que está en el mismo eje gira a la misma velocidad." },
+  { id: "gear10", name: "Engranaje", kind: "gear", category: "mechanical", variant: "10 dientes", desc: "Rueda dentada de 10 dientes. Si la acercas a otro engranaje encaja sola, y giran en sentidos contrarios: el chico va más rápido." },
+  { id: "gear20", name: "Engranaje", kind: "gear", category: "mechanical", variant: "20 dientes", desc: "Rueda dentada de 20 dientes. Si la acercas a otro engranaje encaja sola, y giran en sentidos contrarios." },
+  { id: "gear40", name: "Engranaje", kind: "gear", category: "mechanical", variant: "40 dientes", desc: "Rueda dentada de 40 dientes. Movida por una de 10, gira 4 veces más lento y con 4 veces más fuerza." },
+  { id: "pulleyS", name: "Polea", kind: "pulley", category: "mechanical", variant: "S", desc: "Rueda con canal para una correa. Une dos poleas con una correa para transmitir el giro a distancia." },
+  { id: "pulleyM", name: "Polea", kind: "pulley", category: "mechanical", variant: "M", desc: "Polea mediana. Une dos poleas con una correa: la grande gira más lento que la chica." },
+  { id: "pulleyL", name: "Polea", kind: "pulley", category: "mechanical", variant: "L", desc: "Polea grande. Movida por una chica con una correa, gira más lento." },
+  { id: "belt", name: "Correa", kind: "belt", category: "mechanical", tags: ["liga", "banda"], desc: "Une dos poleas para que giren juntas. Elige Correa y toca dos poleas. La normal mantiene el sentido de giro; la cruzada lo invierte." },
+  { id: "bearing", name: "Rodamiento", kind: "bearing", category: "mechanical", desc: "Sostiene un eje para que gire suave. Se apoya en una placa o un soporte, y el eje pasa por su centro." },
+  { id: "support", name: "Soporte", kind: "support", category: "mechanical", desc: "Base con un agujero arriba para sostener un eje o una junta a cierta altura." },
+  { id: "link", name: "Eslabón", kind: "link", category: "mechanical", tags: ["biela", "brazo"], desc: "Barra con un agujero en cada extremo. Sirve para armar brazos y bielas: une sus agujeros con juntas rotacionales." },
+  { id: "joint", name: "Junta rotacional", kind: "joint", category: "mechanical", tags: ["articulación", "bisagra"], desc: "Herramienta: une dos piezas por agujeros alineados para que puedan girar. Elige Junta rotacional y toca una de las piezas." },
 
-  { id: "profile60", name: "Perfil metálico", kind: "profile", category: "structures", variant: "60 mm" },
-  { id: "profile120", name: "Perfil metálico", kind: "profile", category: "structures", variant: "120 mm" },
-  { id: "profile240", name: "Perfil metálico", kind: "profile", category: "structures", variant: "240 mm" },
-  { id: "plate", name: "Placa base", kind: "plate", category: "structures" },
-  { id: "bolt", name: "Unión", kind: "bolt", category: "structures", variant: "perno fijo", tags: ["perno", "tornillo"] },
+  { id: "profile60", name: "Perfil metálico", kind: "profile", category: "structures", variant: "60 mm", desc: "Barra metálica con agujeros cada 10 mm, para armar estructuras. Su largo se cambia en Propiedades." },
+  { id: "profile120", name: "Perfil metálico", kind: "profile", category: "structures", variant: "120 mm", desc: "Barra metálica con agujeros cada 10 mm, para armar estructuras. Su largo se cambia en Propiedades." },
+  { id: "profile240", name: "Perfil metálico", kind: "profile", category: "structures", variant: "240 mm", desc: "Barra metálica con agujeros cada 10 mm, para armar estructuras. Su largo se cambia en Propiedades." },
+  { id: "plate", name: "Placa base", kind: "plate", category: "structures", desc: "Base fija a la mesa, con agujeros cada 20 mm. Lo que se apoya encima queda unido a ella al simular. Su largo y ancho se cambian." },
+  { id: "bolt", name: "Unión", kind: "bolt", category: "structures", variant: "perno fijo", tags: ["perno", "tornillo"], desc: "Herramienta: une dos piezas por agujeros alineados para que no se muevan entre sí, como un perno. Elige Unión y toca una de las piezas." },
 
-  { id: "sensorAngle", name: "Sensor", kind: "sensor", category: "other", variant: "de ángulo", tags: ["encoder"] },
-  { id: "sensorContact", name: "Sensor", kind: "sensor", category: "other", variant: "de contacto", tags: ["final de carrera"] },
-  { id: "meter", name: "Voltímetro", kind: "meter", category: "other", tags: ["medidor"] },
-  { id: "text", name: "Texto", kind: "text", category: "other", tags: ["nota", "etiqueta"] },
+  { id: "sensorAngle", name: "Sensor", kind: "sensor", category: "other", variant: "de ángulo", tags: ["encoder"], desc: "Mide el ángulo de una junta o un eje. Móntalo en la junta y verás su ángulo en vivo al simular." },
+  { id: "sensorContact", name: "Sensor", kind: "sensor", category: "other", variant: "de contacto", tags: ["final de carrera"], desc: "Pulsador: cierra el circuito mientras está presionado. Lo presionas con su botón o, al simular, cuando una pieza lo toca." },
+  { id: "meter", name: "Voltímetro", kind: "meter", category: "other", tags: ["medidor"], desc: "Voltímetro: mide el voltaje entre sus dos bornes sin afectar el circuito. Conéctalo a los extremos de lo que quieras medir." },
+  { id: "text", name: "Texto", kind: "text", category: "other", tags: ["nota", "etiqueta"], desc: "Cartel para anotar algo en la mesa. Escribe el texto en Propiedades." },
 ];
 
 /** Quita tildes y pasa a minúsculas para comparar. */

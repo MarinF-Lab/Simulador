@@ -10,11 +10,25 @@ interface UIState {
   sheet: Sheet;
   search: string;
   collapsed: Record<CategoryId, boolean>;
+  /** Biblioteca en lista con descripciones. */
+  showDesc: boolean;
+  /** Recuadro "¿Qué es?" abierto en Propiedades. */
+  showInfo: boolean;
+  setShowDesc: (v: boolean) => void;
+  setShowInfo: (v: boolean) => void;
   setTab: (t: Tab) => void;
   toggleRun: () => void;
   openSheet: (s: Sheet) => void;
   setSearch: (q: string) => void;
   toggleCategory: (c: CategoryId) => void;
+}
+
+// Preferencias de vista de cada persona: si el navegador no deja guardarlas, se usa el valor por defecto.
+function load(key: string, d: boolean): boolean {
+  try { const v = localStorage.getItem(key); return v === null ? d : v === "1"; } catch { return d; }
+}
+function save(key: string, v: boolean): void {
+  try { localStorage.setItem(key, v ? "1" : "0"); } catch { /* sin almacenamiento */ }
 }
 
 export const useUI = create<UIState>((set) => ({
@@ -23,6 +37,10 @@ export const useUI = create<UIState>((set) => ({
   sheet: null,
   search: "",
   collapsed: Object.fromEntries(CATEGORIES.map((c) => [c.id, false])) as Record<CategoryId, boolean>,
+  showDesc: load("kinetic.showDesc", false),
+  showInfo: load("kinetic.showInfo", true),
+  setShowDesc: (showDesc) => { save("kinetic.showDesc", showDesc); set({ showDesc }); },
+  setShowInfo: (showInfo) => { save("kinetic.showInfo", showInfo); set({ showInfo }); },
   setTab: (tab) => set({ tab }),
   toggleRun: () => set((s) => ({ running: !s.running, tab: !s.running && s.tab === "design" ? "simulation" : s.tab })),
   openSheet: (sheet) => set({ sheet }),

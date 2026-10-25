@@ -280,7 +280,10 @@ function Model({ type, glow = 0, burned = false, on = true, size }: { type: stri
       return (
         <group>
           <Cyl r={12} h={80} p={[-20, 0, 12]} axis="x" m={M.steel} />
-          <Cyl r={5} h={40} p={[40, 0, 12]} axis="x" m={M.white} />
+          {/* El vástago se corre al simular (ver Part3D). */}
+          <group name="rod">
+            <Cyl r={5} h={40} p={[40, 0, 12]} axis="x" m={M.white} />
+          </group>
           <Box s={[10, 24, 24]} p={[-55, 0, 0]} m={M.dark} />
         </group>
       );

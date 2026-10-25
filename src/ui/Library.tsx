@@ -1,10 +1,13 @@
 import { ChevronDown, Search, X } from "lucide-react";
 import { CATEGORIES, searchCatalog } from "../core/model/catalog";
 import { useUI } from "../store/ui";
+import { useProject } from "../store/project";
+import { sceneApi } from "../scene/api";
 import { PartIcon } from "./PartIcon";
+import { startPaletteGesture } from "./paletteDrag";
 
 export function Library() {
-  const { search, setSearch, collapsed, toggleCategory, selected, select, openSheet } = useUI();
+  const { search, setSearch, collapsed, toggleCategory } = useUI();
   const items = searchCatalog(search);
   const searching = search.trim() !== "";
 
@@ -53,17 +56,17 @@ export function Library() {
                   {list.map((it) => (
                     <button
                       key={it.id}
-                      onClick={() => {
-                        select(it.id);
-                        openSheet(null);
+                      onPointerDown={(e) => startPaletteGesture(e, it.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          const c = sceneApi.viewCenter();
+                          useProject.getState().addNear(it.id, c.x, c.y);
+                        }
                       }}
-                      aria-pressed={selected === it.id}
-                      className={
-                        "flex min-h-[88px] flex-col items-center justify-center gap-1 rounded-lg border px-1 py-2 text-center text-xs leading-tight " +
-                        (selected === it.id
-                          ? "border-accent bg-accent/15 text-ink"
-                          : "border-line bg-panel-2/60 text-ink hover:border-accent/60")
-                      }
+                      onContextMenu={(e) => e.preventDefault()}
+                      aria-label={`Agregar ${it.name.toLowerCase()}${it.variant ? ` ${it.variant}` : ""} a la mesa`}
+                      className="flex min-h-[88px] touch-pan-y flex-col items-center justify-center gap-1 rounded-lg border border-line bg-panel-2/60 px-1 py-2 text-center text-xs leading-tight text-ink select-none hover:border-accent/60 [-webkit-touch-callout:none]"
                     >
                       <PartIcon kind={it.kind} className="size-9 text-ink/85" />
                       <span className="font-medium">{it.name}</span>

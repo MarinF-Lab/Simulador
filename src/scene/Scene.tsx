@@ -1,0 +1,107 @@
+import { useMemo } from "react";
+import { Canvas } from "@react-three/fiber";
+import * as THREE from "three";
+import { extent, TABLE, type Part } from "../core/model/project";
+import { useProject } from "../store/project";
+import { Controller } from "./Controller";
+import { PartModel } from "./models";
+
+const Q = Math.PI / 2;
+
+function Grid() {
+  const [minor, major] = useMemo(() => {
+    const mk = (step: number, skip?: number) => {
+      const pts: number[] = [];
+      const hw = TABLE.w / 2, hd = TABLE.d / 2;
+      for (let x = -hw; x <= hw + 0.1; x += step) if (!skip || Math.round(x) % skip) pts.push(x, -hd, 0, x, hd, 0);
+      for (let y = -hd; y <= hd + 0.1; y += step) if (!skip || Math.round(y) % skip) pts.push(-hw, y, 0, hw, y, 0);
+      return new THREE.BufferGeometry().setAttribute("position", new THREE.Float32BufferAttribute(pts, 3));
+    };
+    return [mk(10, 50), mk(50)];
+  }, []);
+  return (
+    <group position={[0, 0, 0.05]}>
+      <lineSegments geometry={minor}>
+        <lineBasicMaterial color="#232c4a" />
+      </lineSegments>
+      <lineSegments geometry={major}>
+        <lineBasicMaterial color="#3a4673" />
+      </lineSegments>
+    </group>
+  );
+}
+
+function Table() {
+  return (
+    <group>
+      <mesh position={[0, 0, -6]} receiveShadow>
+        <boxGeometry args={[TABLE.w + 24, TABLE.d + 24, 12]} />
+        <meshStandardMaterial color="#121830" roughness={0.9} />
+      </mesh>
+      <mesh position={[0, 0, 0.01]} receiveShadow>
+        <planeGeometry args={[TABLE.w, TABLE.d]} />
+        <meshStandardMaterial color="#1a2140" roughness={0.95} />
+      </mesh>
+      <Grid />
+    </group>
+  );
+}
+
+function SelectionBox({ part }: { part: Part }) {
+  const [ex, ey, ez] = extent(part);
+  const geo = useMemo(() => new THREE.EdgesGeometry(new THREE.BoxGeometry(ex + 6, ey + 6, ez + 6)), [ex, ey, ez]);
+  return (
+    <lineSegments geometry={geo} position={[part.x, part.y, part.z + ez / 2]}>
+      <lineBasicMaterial color="#8b8bff" />
+    </lineSegments>
+  );
+}
+
+function Part3D({ part }: { part: Part }) {
+  const ez = extent(part)[2];
+  return (
+    <group position={[part.x, part.y, part.z + ez / 2]} rotation={[part.rot[0] * Q, part.rot[1] * Q, part.rot[2] * Q]} userData={{ partId: part.id }}>
+      <PartModel type={part.type} />
+    </group>
+  );
+}
+
+export function Scene() {
+  const parts = useProject((s) => s.project.parts);
+  const selected = useProject((s) => s.selected);
+  const sel = parts.find((p) => p.id === selected);
+  return (
+    <Canvas
+      shadows
+      orthographic
+      frameloop="demand"
+      dpr={[1, 2]}
+      camera={{ position: [600, -600, 600], zoom: 1, near: 1, far: 20000, up: [0, 0, 1] }}
+      style={{ touchAction: "none", position: "absolute", inset: 0 }}
+      aria-label="Mesa de trabajo 3D"
+    >
+      <color attach="background" args={["#0f1424"]} />
+      <hemisphereLight args={["#d4dcff", "#2a3050", 1.6]} />
+      <directionalLight
+        position={[350, -500, 900]}
+        intensity={2.6}
+        castShadow
+        shadow-mapSize={[1024, 1024]}
+        shadow-camera-left={-900}
+        shadow-camera-right={900}
+        shadow-camera-top={900}
+        shadow-camera-bottom={-900}
+        shadow-camera-near={10}
+        shadow-camera-far={3000}
+        shadow-bias={-0.0006}
+        shadow-normalBias={1.5}
+      />
+      <Table />
+      <group name="parts">
+        {parts.map((p) => <Part3D key={p.id} part={p} />)}
+      </group>
+      {sel && <SelectionBox part={sel} />}
+      <Controller />
+    </Canvas>
+  );
+}

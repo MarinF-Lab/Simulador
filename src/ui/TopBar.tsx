@@ -1,5 +1,6 @@
 import { ChartLine, Activity, PencilRuler, Play, Redo2, Save, Square, Undo2 } from "lucide-react";
 import { useUI, type Tab } from "../store/ui";
+import { useProject } from "../store/project";
 import { Logo } from "./Logo";
 
 const TABS: { id: Tab; name: string; Icon: typeof Play }[] = [
@@ -13,6 +14,9 @@ const iconBtn =
 
 export function TopBar() {
   const { tab, setTab, running, toggleRun } = useUI();
+  const canUndo = useProject((s) => s.history.past.length > 0);
+  const canRedo = useProject((s) => s.history.future.length > 0);
+  const { undo, redo } = useProject();
   return (
     <header className="z-20 border-b border-line bg-panel pl-[max(12px,env(safe-area-inset-left,0px))] pr-[max(12px,env(safe-area-inset-right,0px))]">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 py-1.5 lg:flex-nowrap lg:gap-4">
@@ -50,10 +54,10 @@ export function TopBar() {
           <button className={iconBtn} aria-label="Guardar" title="Guardar (llega en la etapa 8)" disabled>
             <Save className="size-5" />
           </button>
-          <button className={iconBtn} aria-label="Deshacer" title="Deshacer (llega en la etapa 2)" disabled>
+          <button className={iconBtn} aria-label="Deshacer" title="Deshacer (Ctrl+Z)" onClick={undo} disabled={!canUndo}>
             <Undo2 className="size-5" />
           </button>
-          <button className={iconBtn} aria-label="Rehacer" title="Rehacer (llega en la etapa 2)" disabled>
+          <button className={iconBtn} aria-label="Rehacer" title="Rehacer (Ctrl+Y)" onClick={redo} disabled={!canRedo}>
             <Redo2 className="size-5" />
           </button>
           <button

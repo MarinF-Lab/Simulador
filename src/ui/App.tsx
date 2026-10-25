@@ -1,6 +1,7 @@
 import { useEffect, type ReactNode } from "react";
 import { Boxes, SlidersHorizontal, X } from "lucide-react";
 import { useUI, type Sheet } from "../store/ui";
+import { useProject } from "../store/project";
 import { Library } from "./Library";
 import { Properties } from "./Properties";
 import { TopBar } from "./TopBar";
@@ -36,7 +37,28 @@ export function App() {
   const { sheet, openSheet, tab } = useUI();
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && openSheet(null);
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && t.closest("input, textarea, select")) return;
+      const P = useProject.getState();
+      const mod = e.ctrlKey || e.metaKey;
+      if (mod && e.key.toLowerCase() === "z") {
+        e.preventDefault();
+        if (e.shiftKey) P.redo();
+        else P.undo();
+      } else if (mod && e.key.toLowerCase() === "y") {
+        e.preventDefault();
+        P.redo();
+      } else if (e.key === "Escape") {
+        openSheet(null);
+        P.select(null);
+      } else if ((e.key === "r" || e.key === "R") && !mod && P.selected !== null) {
+        P.rotate(P.selected);
+      } else if ((e.key === "Delete" || e.key === "Backspace") && P.selected !== null) {
+        e.preventDefault();
+        P.remove(P.selected);
+      }
+    };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [openSheet]);

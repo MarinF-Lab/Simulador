@@ -25,4 +25,3 @@ body { background: var(--color-bg); color: var(--color-ink); font-family: var(--
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
-body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 20; background: var(--color-panel); }

@@ -1,0 +1,1428 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Circuitos de Baterías</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=IBM+Plex+Mono:wght@500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: banco de pruebas — diagrama vivo a la izquierda, multímetro y controles a la derecha; guía y tabla debajo */
+:root{
+  --bg:#eef1f5; --surface:#ffffff; --ink:#16202b; --muted:#566476; --line:#d3dae3;
+  --copper:#b65f27; --cell-ink:#fff8f2; --wire:#2c3b4c; --glow:#f2a92c; --pos:#c4372c;
+  --chip:#e6ebf1; --err:#c4372c; --warn:#b7791f; --ok:#2f8a4e;
+  --gear:#cdd5df; --pulley:#e2c4a0; --led:#e5484d; --band:#3a2e28;
+  --f-display:"Barlow Condensed","Arial Narrow",sans-serif;
+  --f-body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0e141b; --surface:#16202a; --ink:#e5eaf0; --muted:#97a4b4; --line:#2a3644;
+  --copper:#dc8a50; --cell-ink:#1c0f05; --wire:#a3b3c5; --glow:#ffc859; --pos:#ff6f62;
+  --chip:#1f2b37; --err:#ff6f62; --warn:#f0b44c; --ok:#5cc485; --gear:#3b4a5b; --pulley:#7a5a3c; --led:#ff6b6b; --band:#d8c6b2; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0e141b; --surface:#16202a; --ink:#e5eaf0; --muted:#97a4b4; --line:#2a3644;
+  --copper:#dc8a50; --cell-ink:#1c0f05; --wire:#a3b3c5; --glow:#ffc859; --pos:#ff6f62;
+  --chip:#1f2b37; --err:#ff6f62; --warn:#f0b44c; --ok:#5cc485; --gear:#3b4a5b; --pulley:#7a5a3c; --led:#ff6b6b; --band:#d8c6b2; color-scheme:dark}
+
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.55}
+.wrap{max-width:1040px;margin:0 auto;padding-block:28px 48px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
+  display:flex;flex-direction:column;gap:22px}
+header h1{font-family:var(--f-display);font-weight:700;font-size:clamp(2rem,6vw,2.9rem);line-height:1;margin:0;letter-spacing:.01em;text-wrap:balance}
+header p{margin:8px 0 0;color:var(--muted);max-width:60ch}
+
+.tabs{display:flex;gap:4px;background:var(--chip);padding:4px;border-radius:10px;width:fit-content;max-width:100%}
+.tabs button{font:600 .95rem var(--f-body);border:0;background:transparent;color:var(--muted);padding:8px 18px;border-radius:7px;cursor:pointer}
+.tabs button[aria-selected="true"]{background:var(--surface);color:var(--ink);box-shadow:0 1px 3px rgb(0 0 0 / .12)}
+.tabs button:focus-visible,.chips button:focus-visible,.step button:focus-visible{outline:2px solid var(--copper);outline-offset:2px}
+
+.bench{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:18px}
+@media (max-width:760px){.bench{grid-template-columns:1fr}}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:18px;min-width:0}
+.diagram{display:flex;flex-direction:column;gap:10px}
+.diagram svg{display:block;width:100%;height:auto;max-height:430px}
+.label{font:600 .72rem var(--f-body);text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0}
+
+.side{display:flex;flex-direction:column;gap:18px}
+.meter{background:var(--wire);color:var(--surface);border-radius:12px;padding:16px 18px;display:flex;flex-direction:column;gap:6px}
+.meter .label{color:inherit;opacity:.75}
+.meter .big{font-family:var(--f-display);font-weight:700;font-size:3.4rem;line-height:1;font-variant-numeric:tabular-nums}
+.meter .big small{font-size:1.6rem;margin-left:4px}
+.meter .formula{font:500 .85rem var(--f-mono);opacity:.9;overflow-wrap:anywhere}
+.stats{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px}
+.stats span{font:500 .78rem var(--f-mono);background:rgb(255 255 255 / .14);padding:3px 8px;border-radius:5px}
+
+.ctrl{display:flex;flex-direction:column;gap:8px}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chips button{font:500 .88rem var(--f-mono);border:1px solid var(--line);background:var(--surface);color:var(--ink);padding:6px 12px;border-radius:7px;cursor:pointer}
+.chips button[aria-pressed="true"]{background:var(--copper);border-color:var(--copper);color:var(--cell-ink)}
+.step{display:flex;align-items:center;gap:10px}
+.step button{width:36px;height:36px;border-radius:8px;border:1px solid var(--line);background:var(--chip);color:var(--ink);font:600 1.2rem var(--f-body);cursor:pointer}
+.step button:disabled{opacity:.35;cursor:default}
+.step output{font:500 1.15rem var(--f-mono);min-width:2ch;text-align:center;font-variant-numeric:tabular-nums}
+.step .hint{color:var(--muted);font-size:.85rem}
+
+.guide{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px 28px}
+@media (max-width:640px){.guide{grid-template-columns:1fr}}
+.guide h2{grid-column:1/-1;font-family:var(--f-display);font-weight:700;font-size:1.7rem;margin:0;line-height:1.1}
+.guide div{min-width:0}
+.guide h3{font:600 .8rem var(--f-body);text-transform:uppercase;letter-spacing:.07em;color:var(--copper);margin:0 0 4px}
+.guide p{margin:0;max-width:62ch}
+.rule{grid-column:1/-1;border-left:3px solid var(--copper);padding:4px 0 4px 12px}
+.rule p{font-weight:500}
+
+.tablewrap{overflow-x:auto}
+table{border-collapse:collapse;width:100%;min-width:560px;font-size:.92rem}
+caption{text-align:left;font-family:var(--f-display);font-weight:700;font-size:1.7rem;padding-bottom:10px}
+th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+thead th{font:600 .75rem var(--f-body);text-transform:uppercase;letter-spacing:.07em;color:var(--muted)}
+tbody th{font-weight:600;color:var(--muted);white-space:nowrap}
+td.on{background:color-mix(in srgb,var(--copper) 10%,transparent)}
+
+.flow{fill:none;stroke:var(--glow);stroke-width:3;stroke-dasharray:3 11;stroke-linecap:round;animation:run 1.1s linear infinite}
+@keyframes run{to{stroke-dashoffset:-14}}
+@media (prefers-reduced-motion:reduce){.flow,.waves{animation:none}}
+
+/* Laboratorio */
+.lab{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:18px;align-items:start}
+@media (max-width:760px){.lab{grid-template-columns:1fr}}
+.labmain{display:flex;flex-direction:column;gap:12px;padding:14px}
+.labbar{display:flex;flex-wrap:wrap;gap:10px;justify-content:space-between;align-items:center}
+.palette{display:flex;flex-wrap:wrap;gap:10px 20px}
+.palgroup{display:flex;flex-direction:column;gap:6px;min-width:0}
+.palrow{display:flex;flex-wrap:wrap;gap:6px}
+.vrow{display:flex;align-items:center;gap:10px}
+.vrow input[type=range]{flex:1;min-width:0;accent-color:var(--copper)}
+.vnum{display:flex;align-items:center;gap:4px;font:500 .9rem var(--f-mono)}
+.vnum input{width:6ch;font:500 .95rem var(--f-mono);padding:6px 8px;border:1px solid var(--line);border-radius:7px;background:var(--surface);color:var(--ink);text-align:right}
+.vnum input:focus-visible{outline:2px solid var(--copper);outline-offset:1px}
+.waves{animation:buzzp .22s ease-in-out infinite alternate}
+@keyframes buzzp{from{opacity:.3}to{opacity:1}}
+.labtools{flex-wrap:wrap}
+.palette button{display:flex;flex-direction:column;align-items:center;gap:2px;border:1px solid var(--line);background:var(--chip);color:var(--ink);border-radius:9px;padding:6px 8px 5px;font:500 .72rem var(--f-body);cursor:grab;touch-action:none;user-select:none;-webkit-user-select:none}
+.palette svg{width:52px;height:26px;pointer-events:none}
+.palette button:focus-visible,.btn:focus-visible{outline:2px solid var(--copper);outline-offset:2px}
+.labtools{display:flex;gap:6px}
+.btn{font:600 .82rem var(--f-body);border:1px solid var(--line);background:var(--surface);color:var(--ink);padding:7px 12px;border-radius:8px;cursor:pointer}
+.btn.danger{color:var(--err)}
+.btn.primary{background:var(--copper);border-color:var(--copper);color:var(--cell-ink)}
+.boardwrap{border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--bg)}
+#board{display:block;width:100%;height:460px;touch-action:none;user-select:none;-webkit-user-select:none}
+.boardwrap.tall #board{height:min(78vh,760px)}
+.zoomtools{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.btn.sq{width:36px;padding:7px 0;font-size:1.05rem;line-height:1}
+.zval{font:500 .82rem var(--f-mono);min-width:4.2ch;text-align:center;font-variant-numeric:tabular-nums;color:var(--muted)}
+.labhint{margin:0;color:var(--muted);font-size:.85rem;max-width:65ch}
+.labside{display:flex;flex-direction:column;gap:18px;min-width:0}
+.issues{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px}
+.issues li{display:grid;grid-template-columns:10px minmax(0,1fr);gap:10px;font-size:.9rem}
+.issues li::before{content:"";width:10px;height:10px;border-radius:50%;margin-top:6px;background:var(--dot)}
+.issues li.err{--dot:var(--err)} .issues li.warn{--dot:var(--warn)} .issues li.ok{--dot:var(--ok)} .issues li.info{--dot:var(--muted)}
+.issues b{font-weight:600}
+.insp{display:flex;flex-direction:column;gap:14px}
+.insp h3{margin:0;font-family:var(--f-display);font-size:1.45rem;line-height:1.1}
+.readings{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.readings div{background:var(--chip);border-radius:8px;padding:8px 10px;min-width:0}
+.readings span{display:block;font:600 .66rem var(--f-body);text-transform:uppercase;letter-spacing:.07em;color:var(--muted)}
+.readings strong{font:500 .98rem var(--f-mono);font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.row{display:flex;flex-wrap:wrap;gap:6px}
+#pot-range{width:100%;accent-color:var(--copper)}
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Circuitos de Baterías</h1>
+    <p id="lede">Cambia la conexión, la cantidad de baterías y su voltaje. El diagrama y el voltaje total se actualizan al instante.</p>
+  </header>
+
+  <div class="tabs" role="tablist" aria-label="Tipo de circuito">
+    <button role="tab" id="tab-serie" data-mode="serie" aria-selected="true">Serie</button>
+    <button role="tab" id="tab-paralelo" data-mode="paralelo" aria-selected="false">Paralelo</button>
+    <button role="tab" id="tab-mixto" data-mode="mixto" aria-selected="false">Mixto</button>
+    <button role="tab" id="tab-lab" data-mode="lab" aria-selected="false">Laboratorio</button>
+  </div>
+
+  <section class="bench" id="sim-bench">
+    <div class="panel diagram">
+      <p class="label" id="diag-label">Diagrama</p>
+      <div id="svgbox"></div>
+    </div>
+
+    <div class="side">
+      <div class="meter" aria-live="polite">
+        <p class="label">Voltaje total en la carga</p>
+        <div class="big" id="vtotal">6<small>V</small></div>
+        <div class="formula" id="formula"></div>
+        <div class="stats"><span id="st-count"></span><span id="st-dur"></span></div>
+      </div>
+
+      <div class="panel side">
+        <div class="ctrl">
+          <p class="label">Voltaje de cada batería</p>
+          <div class="chips" id="volts">
+            <button data-v="1.5" aria-pressed="true">1,5 V</button>
+            <button data-v="3.7" aria-pressed="false">3,7 V</button>
+            <button data-v="9" aria-pressed="false">9 V</button>
+            <button data-v="12" aria-pressed="false">12 V</button>
+          </div>
+        </div>
+
+        <div class="ctrl" id="ctl-n">
+          <p class="label">Cantidad de baterías</p>
+          <div class="step">
+            <button id="n-minus" aria-label="Quitar batería">−</button>
+            <output id="n-val">4</output>
+            <button id="n-plus" aria-label="Agregar batería">+</button>
+          </div>
+        </div>
+
+        <div class="ctrl" id="ctl-s" hidden>
+          <p class="label">Baterías en serie por rama (S)</p>
+          <div class="step">
+            <button id="s-minus" aria-label="Quitar batería por rama">−</button>
+            <output id="s-val">3</output>
+            <button id="s-plus" aria-label="Agregar batería por rama">+</button>
+            <span class="hint">define el voltaje</span>
+          </div>
+        </div>
+        <div class="ctrl" id="ctl-p" hidden>
+          <p class="label">Ramas en paralelo (P)</p>
+          <div class="step">
+            <button id="p-minus" aria-label="Quitar rama">−</button>
+            <output id="p-val">2</output>
+            <button id="p-plus" aria-label="Agregar rama">+</button>
+            <span class="hint">define la duración</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel guide" id="guide"></section>
+
+  <section class="panel" id="sim-table">
+    <div class="tablewrap">
+      <table>
+        <caption>Comparación rápida</caption>
+        <thead><tr><th></th><th data-col="serie">Serie</th><th data-col="paralelo">Paralelo</th><th data-col="mixto">Mixto</th></tr></thead>
+        <tbody>
+          <tr><th>Conexión</th><td data-col="serie">+ con − en cadena</td><td data-col="paralelo">+ con + y − con −</td><td data-col="mixto">Ramas en serie unidas en paralelo</td></tr>
+          <tr><th>Voltaje total</th><td data-col="serie">Se suma: N × V</td><td data-col="paralelo">Igual al de una batería</td><td data-col="mixto">S × V</td></tr>
+          <tr><th>Duración</th><td data-col="serie">Igual a una batería</td><td data-col="paralelo">Se multiplica × N</td><td data-col="mixto">Se multiplica × P</td></tr>
+          <tr><th>Si una batería falla</th><td data-col="serie">Se corta todo el circuito</td><td data-col="paralelo">Las demás siguen funcionando</td><td data-col="mixto">Deja de aportar solo esa rama</td></tr>
+          <tr><th>Uso típico</th><td data-col="serie">Controles remotos, linternas</td><td data-col="paralelo">Power banks, respaldo</td><td data-col="mixto">Bicicletas y autos eléctricos</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="lab" hidden>
+    <div class="lab">
+      <div class="panel labmain">
+        <div class="palette" id="palette" aria-label="Componentes"></div>
+        <div class="labbar">
+          <div class="zoomtools" role="group" aria-label="Zoom de la mesa">
+            <button class="btn sq" id="z-out" aria-label="Alejar">−</button>
+            <span id="z-val" class="zval">100%</span>
+            <button class="btn sq" id="z-in" aria-label="Acercar">+</button>
+            <button class="btn" id="z-fit">Ajustar</button>
+            <button class="btn" id="z-tall" aria-pressed="false">Mesa alta</button>
+          </div>
+          <div class="labtools">
+            <button class="btn" id="lab-sound" aria-pressed="false">Sonido: no</button>
+            <button class="btn" id="lab-ex-motor">Ejemplo: motor</button>
+            <button class="btn" id="lab-ex-bulb">Ejemplo: ampolleta</button>
+            <button class="btn danger" id="lab-clear">Limpiar mesa</button>
+          </div>
+        </div>
+        <div class="boardwrap" id="boardwrap"><svg id="board" aria-label="Mesa de trabajo"></svg></div>
+        <p class="labhint">Arrastra componentes, cables o piezas a la mesa. Conecta tocando un borne y luego otro, o arrastrando las puntas de un cable hasta los bornes. Pon un engranaje o una polea sobre el centro de un motor para que gire. Mueve la mesa arrastrando el fondo y acerca o aleja con dos dedos, la rueda del mouse o los botones. Para girar, usa ⟳ o toca dos veces el componente.</p>
+      </div>
+      <div class="labside">
+        <div class="panel insp" id="status"></div>
+        <div class="panel" id="inspector"></div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+const GUIDE={
+  serie:{t:"Circuito en serie",
+    rule:"Los voltajes se suman: V total = V₁ + V₂ + … + Vₙ.",
+    items:[
+      ["Cómo se conecta","El polo positivo (+) de cada batería se une al negativo (−) de la siguiente, formando una sola cadena. La corriente tiene un único camino."],
+      ["Ventaja","Consigues un voltaje más alto usando baterías pequeñas."],
+      ["Desventaja","Si una batería falla o se suelta, el circuito completo se corta. La duración es la misma que la de una sola batería."],
+      ["Ejemplo","Un control remoto con 2 pilas AA de 1,5 V funciona con 3 V."]]},
+  paralelo:{t:"Circuito en paralelo",
+    rule:"El voltaje no cambia: V total = V₁ = V₂ = … = Vₙ. Lo que aumenta es la duración.",
+    items:[
+      ["Cómo se conecta","Todos los polos positivos se unen entre sí y todos los negativos entre sí. Cada batería es un camino distinto para la corriente."],
+      ["Ventaja","Más autonomía. Si una batería falla, las otras siguen entregando energía."],
+      ["Desventaja","No sube el voltaje. Las baterías deben ser iguales y tener la misma carga, si no, las más cargadas descargan a las otras."],
+      ["Ejemplo","Un power bank une varias celdas de 3,7 V en paralelo: sigue entregando 3,7 V, pero dura mucho más."]]},
+  mixto:{t:"Circuito mixto (serie-paralelo)",
+    rule:"El voltaje lo define la cantidad en serie (S × V). La duración la define la cantidad de ramas (× P).",
+    items:[
+      ["Cómo se conecta","Primero se arman ramas de baterías en serie y luego esas ramas se unen en paralelo. Se nombra con S y P: 3S2P son 3 en serie por rama y 2 ramas."],
+      ["Ventaja","Combina lo mejor de ambos: más voltaje y más duración."],
+      ["Desventaja","Requiere más baterías y conexiones. Todas las ramas deben tener el mismo voltaje."],
+      ["Ejemplo","Muchas baterías de bicicleta eléctrica usan celdas de 3,7 V en 10S4P: 10 × 3,7 V = 37 V."]]}
+};
+
+const st={mode:"serie",v:1.5,n:{serie:4,paralelo:3},s:3,p:2};
+const $=id=>document.getElementById(id);
+const fmt=x=>Number(x.toFixed(2)).toLocaleString("es-CL");
+
+function dims(){
+  if(st.mode==="serie")return{S:st.n.serie,P:1};
+  if(st.mode==="paralelo")return{S:1,P:st.n.paralelo};
+  return{S:st.s,P:st.p};
+}
+
+function draw(S,P,total){
+  const CW=62,NUB=6,CH=32,GAP=20,RS=58;
+  const L=26,x0=50;
+  const rowW=S*(CW+NUB)+(S-1)*GAP;
+  const R=x0+rowW+24;
+  const topY=40,y0=topY+92;
+  const lastY=y0+(P-1)*RS;
+  const inner=R+26;
+  const W=Math.max(inner,280);
+  const H=lastY+CH/2+22;
+  const ox=(W-inner)/2;
+  const mid=(L+R)/2;
+  const glow=Math.min(1,0.15+total/20);
+
+  let wires=`<path d="M${R} ${lastY}V${topY}H${L}V${lastY}"/>`;
+  let flows=`<path class="flow" d="M${R} ${lastY}V${topY}H${L}V${lastY}"/>`;
+  let cells="";
+  for(let r=0;r<P;r++){
+    const y=y0+r*RS;
+    wires+=`<path d="M${L} ${y}H${R}"/>`;
+    flows+=`<path class="flow" d="M${L} ${y}H${R}"/>`;
+    for(let c=0;c<S;c++){
+      const x=x0+c*(CW+NUB+GAP);
+      cells+=`<g>
+        <rect x="${x}" y="${y-CH/2}" width="${CW}" height="${CH}" rx="4" fill="var(--copper)"/>
+        <rect x="${x+CW}" y="${y-7}" width="${NUB}" height="14" rx="1.5" fill="var(--wire)"/>
+        <text x="${x+7}" y="${y+4}" font-size="12" fill="var(--cell-ink)" font-family="var(--f-mono)">−</text>
+        <text x="${x+CW-7}" y="${y+4}" font-size="12" fill="var(--cell-ink)" text-anchor="end" font-family="var(--f-mono)">+</text>
+        <text x="${x+CW/2}" y="${y+4}" font-size="11" fill="var(--cell-ink)" text-anchor="middle" font-family="var(--f-mono)">${fmt(st.v)}V</text>
+      </g>`;
+    }
+  }
+  if(P>1){
+    for(let r=0;r<P;r++){
+      const y=y0+r*RS;
+      wires+=`<circle cx="${L}" cy="${y}" r="3.5" fill="var(--wire)"/><circle cx="${R}" cy="${y}" r="3.5" fill="var(--wire)"/>`;
+    }
+  }
+  const bulb=`<circle cx="${mid}" cy="${topY}" r="30" fill="var(--glow)" opacity="${(glow*0.45).toFixed(2)}"/>
+    <circle cx="${mid}" cy="${topY}" r="15" fill="var(--surface)" stroke="var(--wire)" stroke-width="2.5"/>
+    <circle cx="${mid}" cy="${topY}" r="10" fill="var(--glow)" opacity="${glow.toFixed(2)}"/>
+    <path d="M${mid-7} ${topY-7}L${mid+7} ${topY+7}M${mid+7} ${topY-7}L${mid-7} ${topY+7}" stroke="var(--wire)" stroke-width="2"/>
+    <text x="${mid}" y="${topY+46}" font-size="12" fill="var(--muted)" text-anchor="middle" font-family="var(--f-body)">Ampolleta · ${fmt(total)} V</text>`;
+
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Diagrama: ${S} en serie por rama, ${P} rama(s), ${fmt(total)} voltios">
+    <g transform="translate(${ox} 0)">
+      <g fill="none" stroke="var(--wire)" stroke-width="2.5" stroke-linejoin="round">${wires}</g>
+      ${flows}${cells}${bulb}
+    </g></svg>`;
+}
+
+const LEDE_SIM="Cambia la conexión, la cantidad de baterías y su voltaje. El diagrama y el voltaje total se actualizan al instante.";
+const LEDE_LAB="Arma tu propio circuito con pilas, resistencias, interruptores y ampolletas. Si algo queda mal conectado, verás el aviso al instante.";
+function render(){
+  const isLab=st.mode==="lab";
+  document.querySelectorAll(".tabs button").forEach(b=>b.setAttribute("aria-selected",b.dataset.mode===st.mode));
+  ["sim-bench","guide","sim-table"].forEach(id=>{$(id).hidden=isLab});
+  $("lab").hidden=!isLab;
+  $("lede").textContent=isLab?LEDE_LAB:LEDE_SIM;
+  if(isLab){labRender();return;}
+  updateSound();
+  const {S,P}=dims();
+  const total=S*st.v;
+  $("svgbox").innerHTML=draw(S,P,total);
+  $("vtotal").innerHTML=`${fmt(total)}<small>V</small>`;
+  let f;
+  if(st.mode==="serie") f=`${S} × ${fmt(st.v)} V = ${fmt(total)} V`;
+  else if(st.mode==="paralelo") f=`V total = V de una batería = ${fmt(st.v)} V`;
+  else f=`${S}S${P}P → ${S} × ${fmt(st.v)} V = ${fmt(total)} V`;
+  $("formula").textContent=f;
+  $("st-count").textContent=`Baterías: ${S*P}`;
+  $("st-dur").textContent=`Duración: ×${P}`;
+  $("diag-label").textContent=st.mode==="mixto"?`Diagrama · ${S}S${P}P`:`Diagrama · ${S*P} batería${S*P>1?"s":""}`;
+
+  const isMix=st.mode==="mixto";
+  $("ctl-n").hidden=isMix; $("ctl-s").hidden=!isMix; $("ctl-p").hidden=!isMix;
+  if(!isMix){
+    const n=st.n[st.mode];
+    $("n-val").textContent=n; $("n-minus").disabled=n<=1; $("n-plus").disabled=n>=6;
+  }
+  $("s-val").textContent=st.s; $("s-minus").disabled=st.s<=1; $("s-plus").disabled=st.s>=4;
+  $("p-val").textContent=st.p; $("p-minus").disabled=st.p<=1; $("p-plus").disabled=st.p>=3;
+
+  document.querySelectorAll(".tabs button").forEach(b=>b.setAttribute("aria-selected",b.dataset.mode===st.mode));
+  document.querySelectorAll("[data-col]").forEach(c=>c.classList.toggle("on",c.dataset.col===st.mode));
+
+  const g=GUIDE[st.mode];
+  $("guide").innerHTML=`<h2>${g.t}</h2><div class="rule"><p>${g.rule}</p></div>`+
+    g.items.map(([h,p])=>`<div><h3>${h}</h3><p>${p}</p></div>`).join("");
+}
+
+document.querySelectorAll(".tabs button").forEach(b=>b.addEventListener("click",()=>{
+  st.mode=b.dataset.mode;
+  try{history.replaceState(null,"","#"+st.mode)}catch(e){}
+  render();
+}));
+document.querySelectorAll("#volts button").forEach(b=>b.addEventListener("click",()=>{
+  st.v=parseFloat(b.dataset.v);
+  document.querySelectorAll("#volts button").forEach(x=>x.setAttribute("aria-pressed",x===b));
+  render();
+}));
+$("n-minus").onclick=()=>{st.n[st.mode]=Math.max(1,st.n[st.mode]-1);render()};
+$("n-plus").onclick=()=>{st.n[st.mode]=Math.min(6,st.n[st.mode]+1);render()};
+$("s-minus").onclick=()=>{st.s=Math.max(1,st.s-1);render()};
+$("s-plus").onclick=()=>{st.s=Math.min(4,st.s+1);render()};
+$("p-minus").onclick=()=>{st.p=Math.max(1,st.p-1);render()};
+$("p-plus").onclick=()=>{st.p=Math.min(3,st.p+1);render()};
+
+/* ================= LABORATORIO ================= */
+const GRID=20, RINT=0.05, GC=1000, GL=0.1, WW=2400, WH=1600, RPM_N=120;
+const RM=(()=>{try{return matchMedia("(prefers-reduced-motion: reduce)").matches}catch(e){return false}})();
+const lab={comps:[],cables:[],mech:[],bands:[],sel:null,pending:null,bandMode:null,drag:null,pinch:null,ptr:null,
+  W:320,H:460,k:1,tx:0,ty:0,nextId:1,res:{},omega:{},ang:{},issues:[],flag:{},occ:{},tall:false,lastSk:"",needFit:true,sound:false};
+const pointers=new Map();
+let raf=0, edgeRaf=0, spinRaf=0, spinLast=0, lastScreen=null, lastTap={id:0,t:0};
+const board=$("board");
+const byId=id=>lab.comps.find(c=>c.id===id);
+const cabById=id=>lab.cables.find(c=>c.id===id);
+const mechById=id=>lab.mech.find(m=>m.id===id);
+const bandById=id=>lab.bands.find(b=>b.id===id);
+const fmtR=r=>r>=1000?fmt(r/1000)+" kΩ":fmt(r)+" Ω";
+const fmtA=i=>Math.abs(i).toLocaleString("es-CL",{minimumFractionDigits:3,maximumFractionDigits:3})+" A";
+const fmtW=p=>Math.abs(p).toLocaleString("es-CL",{maximumFractionDigits:3})+" W";
+const fmtRpm=w=>Math.round(Math.abs(w)).toLocaleString("es-CL")+" RPM";
+const snap=v=>Math.round(v/GRID)*GRID;
+const key=p=>p.x+","+p.y;
+const cell=(k,v)=>`<div><span>${k}</span><strong>${v}</strong></div>`;
+const GEAR={s:{t:10,n:"pequeño"},m:{t:20,n:"mediano"},l:{t:40,n:"grande"}};
+const PUL={s:{r:16,n:"pequeña"},m:{r:28,n:"mediana"},l:{r:44,n:"grande"}};
+const mr=m=>m.type==="gear"?GEAR[m.size].t*2:PUL[m.size].r;
+
+function cname(c){
+  switch(c.type){
+    case"bat":return`Pila de ${fmt(c.v)} V`;
+    case"res":return`Resistencia de ${fmtR(c.r)}`;
+    case"pot":return"Potenciómetro";
+    case"sw":return"Interruptor";
+    case"bulb":return`Ampolleta de ${fmt(c.vn)} V`;
+    case"motor":return`Motor de ${fmt(c.vn)} V`;
+    case"led":return`LED de ${fmt(c.vf)} V`;
+    case"buzz":return`Zumbador de ${fmt(c.vn)} V`;
+  }
+}
+const mname=m=>m.type==="gear"?`Engranaje ${GEAR[m.size].n}`:`Polea ${PUL[m.size].n}`;
+function label(c){
+  if(c.burned)return c.type==="bulb"||c.type==="motor"?(c.type==="bulb"?"quemada":"quemado"):"quemado";
+  switch(c.type){
+    case"bat":return`${fmt(c.v)} V`;
+    case"res":case"pot":return fmtR(c.r);
+    case"sw":return c.closed?"cerrado":"abierto";
+    case"bulb":case"buzz":return`${fmt(c.vn)} V`;
+    case"motor":{const w=lab.omega[c.id]||0;return`${fmt(c.vn)} V${Math.abs(w)>0.5?" · "+fmtRpm(w):""}`}
+    case"led":return`LED ${fmt(c.vf)} V`;
+  }
+}
+function defaults(type){
+  const c={type,rot:0};
+  if(type==="bat")c.v=9;
+  if(type==="res")c.r=100;
+  if(type==="pot")c.r=500;
+  if(type==="sw")c.closed=true;
+  if(type==="bulb"){c.vn=6;c.burned=false}
+  if(type==="motor"){c.vn=6;c.burned=false}
+  if(type==="led"){c.vf=2;c.on=false;c.burned=false}
+  if(type==="buzz"){c.vn=5;c.burned=false}
+  return c;
+}
+function newComp(type,x,y){const c=Object.assign(defaults(type),{id:lab.nextId++,x,y});lab.comps.push(c);return c}
+function newMech(type,x,y,size){const m={id:lab.nextId++,type,size:size||"m",x,y,att:null};lab.mech.push(m);return m}
+function termPos(c,t){const d=t?40:-40,a=c.rot*Math.PI/180;return{x:c.x+Math.round(d*Math.cos(a)),y:c.y+Math.round(d*Math.sin(a))}}
+function termAt(p){for(const c of lab.comps)for(const t of[0,1]){const q=termPos(c,t);if(q.x===p.x&&q.y===p.y)return{c:c.id,t}}return null}
+function epos(e){if(e.att){const c=byId(e.att.c);if(c)return termPos(c,e.att.t)}return{x:e.x,y:e.y}}
+function mpos(m){if(m.att){const c=byId(m.att);if(c)return{x:c.x,y:c.y}}return{x:m.x,y:m.y}}
+function newCable(p0,p1,a0,a1){
+  const cb={id:lab.nextId++,shape:"hv",e:[{x:p0.x,y:p0.y,att:a0||null},{x:p1.x,y:p1.y,att:a1||null}]};
+  lab.cables.push(cb);return cb;
+}
+function cablePath(cb,rev){
+  const p=epos(cb.e[0]),q=epos(cb.e[1]);
+  if(cb.shape==="line")return rev?`M${q.x} ${q.y}L${p.x} ${p.y}`:`M${p.x} ${p.y}L${q.x} ${q.y}`;
+  if(cb.shape==="vh")return rev?`M${q.x} ${q.y}H${p.x}V${p.y}`:`M${p.x} ${p.y}V${q.y}H${q.x}`;
+  return rev?`M${q.x} ${q.y}V${p.y}H${p.x}`:`M${p.x} ${p.y}H${q.x}V${q.y}`;
+}
+function freeEnds(id){
+  lab.cables.forEach(cb=>cb.e.forEach(e=>{if(e.att&&e.att.c===id){const p=epos(e);e.x=p.x;e.y=p.y;e.att=null}}));
+  lab.mech.forEach(m=>{if(m.att===id){const p=mpos(m);m.x=p.x;m.y=p.y;m.att=null}});
+}
+function reattach(){lab.cables.forEach(cb=>cb.e.forEach(e=>{if(!e.att)e.att=termAt({x:e.x,y:e.y})}))}
+function removeComp(id){
+  freeEnds(id);
+  lab.comps=lab.comps.filter(c=>c.id!==id);
+  if(lab.pending&&lab.pending.c===id)lab.pending=null;
+  lab.sel=null;
+}
+function removeMech(id){
+  lab.mech=lab.mech.filter(m=>m.id!==id);
+  lab.bands=lab.bands.filter(b=>b.a!==id&&b.b!==id);
+  lab.sel=null;
+}
+function clampComp(c){
+  const horiz=c.rot%180===0, mx=horiz?60:40, my=horiz?40:60;
+  c.x=Math.min(Math.max(snap(c.x),mx),WW-mx);
+  c.y=Math.min(Math.max(snap(c.y),my),WH-my);
+}
+function clampPt(p){return{x:Math.min(Math.max(snap(p.x),20),WW-20),y:Math.min(Math.max(snap(p.y),20),WH-20)}}
+function rotateComp(c){c.rot=(c.rot+90)%360;clampComp(c);reattach()}
+function flipComp(c){
+  c.rot=(c.rot+180)%360;
+  lab.cables.forEach(cb=>cb.e.forEach(e=>{if(e.att&&e.att.c===c.id)e.att.t=1-e.att.t}));
+}
+function connectTerms(a,b){
+  const A=byId(a.c),B=byId(b.c);if(!A||!B)return;
+  const pa=termPos(A,a.t),pb=termPos(B,b.t);
+  if(key(pa)===key(pb))return;
+  const same=lab.cables.some(cb=>{const x=cb.e[0].att,y=cb.e[1].att;
+    return x&&y&&((x.c===a.c&&x.t===a.t&&y.c===b.c&&y.t===b.t)||(x.c===b.c&&x.t===b.t&&y.c===a.c&&y.t===a.t))});
+  if(!same)return newCable(pa,pb,{c:a.c,t:a.t},{c:b.c,t:b.t});
+}
+function snapTarget(w,cb,i){
+  const r=26/lab.k;let best=null,bd=r;
+  lab.comps.forEach(c=>[0,1].forEach(t=>{const p=termPos(c,t),d=Math.hypot(p.x-w.x,p.y-w.y);if(d<bd){bd=d;best={x:p.x,y:p.y,term:{c:c.id,t}}}}));
+  lab.cables.forEach(o=>{if(o===cb)return;o.e.forEach(e=>{const p=epos(e),d=Math.hypot(p.x-w.x,p.y-w.y);if(d<bd){bd=d;best={x:p.x,y:p.y,term:termAt(p)}}})});
+  if(best)return best;
+  const p=clampPt(w);return{x:p.x,y:p.y,term:termAt(p)};
+}
+function mechSnap(m,p){
+  const tol=16;
+  for(const c of lab.comps)if(c.type==="motor"&&Math.hypot(c.x-p.x,c.y-p.y)<tol)return{x:c.x,y:c.y,att:c.id};
+  for(const o of lab.mech){if(o===m)continue;const q=mpos(o);if(Math.hypot(q.x-p.x,q.y-p.y)<tol)return{x:q.x,y:q.y,att:o.att}}
+  if(m.type==="gear"){
+    const rm=mr(m);let best=null,bd=18;
+    lab.mech.forEach(o=>{
+      if(o===m||o.type!=="gear")return;
+      const q=mpos(o),s=rm+mr(o),d=Math.hypot(p.x-q.x,p.y-q.y),gap=Math.abs(d-s);
+      if(gap<bd&&d>1){bd=gap;best={x:q.x+(p.x-q.x)/d*s,y:q.y+(p.y-q.y)/d*s,att:null}}
+    });
+    if(best)return best;
+  }
+  const r=mr(m);
+  return{x:Math.min(Math.max(snap(p.x),r+4),WW-r-4),y:Math.min(Math.max(snap(p.y),r+4),WH-r-4),att:null};
+}
+function visibleWorld(){return{x0:-lab.tx/lab.k,y0:-lab.ty/lab.k,x1:(lab.W-lab.tx)/lab.k,y1:(lab.H-lab.ty)/lab.k}}
+function findFree(rad){
+  rad=rad||40;
+  const v=visibleWorld();
+  const x0=Math.max(80,snap(v.x0+60+rad)), y0=Math.max(60,snap(v.y0+40+rad));
+  for(let y=y0;y<v.y1-rad;y+=40)for(let x=x0;x<v.x1-rad;x+=40){
+    const okC=lab.comps.every(c=>Math.hypot(c.x-x,c.y-y)>50+rad);
+    const okW=lab.cables.every(cb=>cb.e.every(e=>{const p=epos(e);return Math.hypot(p.x-x,p.y-y)>20+rad}));
+    const okM=lab.mech.every(m=>{const q=mpos(m);return Math.hypot(q.x-x,q.y-y)>mr(m)+rad+10});
+    if(okC&&okW&&okM)return{x,y};
+  }
+  return clampPt({x:(v.x0+v.x1)/2,y:(v.y0+v.y1)/2});
+}
+function resetBoard(){lab.comps=[];lab.cables=[];lab.mech=[];lab.bands=[];lab.nextId=1;lab.sel=null;lab.pending=null;lab.bandMode=null;lab.ang={}}
+function loadBulbExample(){
+  resetBoard();
+  const b=newComp("bat",80,100), s=newComp("sw",200,100), r=newComp("res",240,200), l=newComp("bulb",140,300);
+  r.rot=90;
+  connectTerms({c:b.id,t:1},{c:s.id,t:0});
+  connectTerms({c:s.id,t:1},{c:r.id,t:0});
+  connectTerms({c:r.id,t:1},{c:l.id,t:1});
+  connectTerms({c:l.id,t:0},{c:b.id,t:0});
+  lab.needFit=true;
+}
+function loadMotorExample(){
+  resetBoard();
+  const b=newComp("bat",80,100), s=newComp("sw",200,100), mo=newComp("motor",300,180);
+  b.v=6;mo.rot=90;
+  connectTerms({c:b.id,t:1},{c:s.id,t:0});
+  connectTerms({c:s.id,t:1},{c:mo.id,t:1});
+  connectTerms({c:mo.id,t:0},{c:b.id,t:0});
+  const g1=newMech("gear",300,180,"s");g1.att=mo.id;
+  newMech("gear",400,180,"l");
+  newMech("pulley",400,180,"s");
+  newMech("pulley",580,180,"l");
+  lab.bands.push({id:lab.nextId++,a:lab.mech[2].id,b:lab.mech[3].id,cross:false});
+  lab.needFit=true;
+}
+
+/* ---- Vista: zoom y desplazamiento ---- */
+function toWorld(cx,cy){const r=board.getBoundingClientRect();const sx=cx-r.left,sy=cy-r.top;return{x:(sx-lab.tx)/lab.k,y:(sy-lab.ty)/lab.k,sx,sy}}
+function clampPan(){
+  const fx=lab.W-WW*lab.k, fy=lab.H-WH*lab.k;
+  lab.tx=fx>0?fx/2:Math.min(40,Math.max(fx-40,lab.tx));
+  lab.ty=fy>0?fy/2:Math.min(40,Math.max(fy-40,lab.ty));
+}
+function zoomAt(sx,sy,nk){
+  nk=Math.min(2.5,Math.max(0.35,nk));
+  const wx=(sx-lab.tx)/lab.k, wy=(sy-lab.ty)/lab.k;
+  lab.k=nk;lab.tx=sx-wx*nk;lab.ty=sy-wy*nk;
+  clampPan();req();
+}
+function computeFit(){
+  const xs=[],ys=[];
+  lab.comps.forEach(c=>{xs.push(c.x-50,c.x+50);ys.push(c.y-50,c.y+50)});
+  lab.cables.forEach(cb=>cb.e.forEach(e=>{const p=epos(e);xs.push(p.x);ys.push(p.y)}));
+  lab.mech.forEach(m=>{const p=mpos(m),r=mr(m)+8;xs.push(p.x-r,p.x+r);ys.push(p.y-r,p.y+r+18)});
+  if(!xs.length){lab.k=1;lab.tx=0;lab.ty=0;clampPan();return}
+  const minx=Math.min(...xs),maxx=Math.max(...xs),miny=Math.min(...ys),maxy=Math.max(...ys);
+  lab.k=Math.max(0.35,Math.min(lab.W/(maxx-minx+40),lab.H/(maxy-miny+40),1.6));
+  lab.tx=lab.W/2-(minx+maxx)/2*lab.k;lab.ty=lab.H/2-(miny+maxy)/2*lab.k;
+  clampPan();
+}
+
+/* ---- Cálculo eléctrico: análisis nodal ---- */
+function solve(A,b,n){
+  const M=A.map((r,i)=>{const x=Array.from(r);x.push(b[i]);return x});
+  for(let k=0;k<n;k++){
+    let p=k;for(let i=k+1;i<n;i++)if(Math.abs(M[i][k])>Math.abs(M[p][k]))p=i;
+    [M[k],M[p]]=[M[p],M[k]];
+    const d=M[k][k];if(Math.abs(d)<1e-15)continue;
+    for(let i=k+1;i<n;i++){const f=M[i][k]/d;if(!f)continue;for(let j=k;j<=n;j++)M[i][j]-=f*M[k][j]}
+  }
+  const x=new Array(n).fill(0);
+  for(let i=n-1;i>=0;i--){let s=M[i][n];for(let j=i+1;j<n;j++)s-=M[i][j]*x[j];x[i]=Math.abs(M[i][i])<1e-15?0:s/M[i][i]}
+  return x;
+}
+function cond(c){
+  if(c.type==="res"||c.type==="pot")return 1/Math.max(c.r,0.001);
+  if(c.type==="sw")return c.closed?1000:0;
+  if(c.burned)return 0;
+  if(c.type==="bulb")return 0.5/(c.vn*c.vn);
+  if(c.type==="motor")return 3/(c.vn*c.vn);
+  if(c.type==="buzz")return 0.25/(c.vn*c.vn);
+  return 0;
+}
+function simulate(){
+  let node,R={};
+  for(let pass=0;pass<12;pass++){
+    const idx={};let n=0;
+    const nid=p=>{const k=key(p);if(!(k in idx))idx[k]=n++;return idx[k]};
+    lab.comps.forEach(c=>{nid(termPos(c,0));nid(termPos(c,1))});
+    lab.cables.forEach(cb=>{nid(epos(cb.e[0]));nid(epos(cb.e[1]))});
+    node=(c,t)=>idx[key(termPos(c,t))];
+    const cn=cb=>[idx[key(epos(cb.e[0]))],idx[key(epos(cb.e[1]))]];
+    const Gm=Array.from({length:n},()=>new Float64Array(n)), Iv=new Float64Array(n);
+    for(let i=0;i<n;i++)Gm[i][i]+=1e-9;
+    const stamp=(a,b,g)=>{Gm[a][a]+=g;Gm[b][b]+=g;Gm[a][b]-=g;Gm[b][a]-=g};
+    lab.comps.forEach(c=>{
+      const a=node(c,0),b=node(c,1);if(a===b)return;
+      if(c.type==="bat"){stamp(a,b,1/RINT);Iv[b]+=c.v/RINT;Iv[a]-=c.v/RINT}
+      else if(c.type==="led"){if(c.on&&!c.burned){stamp(a,b,GL);Iv[b]+=c.vf*GL;Iv[a]-=c.vf*GL}}
+      else{const g=cond(c);if(g>0)stamp(a,b,g)}
+    });
+    lab.cables.forEach(cb=>{const[a,b]=cn(cb);if(a!==b)stamp(a,b,GC)});
+    const V=n?solve(Gm,Iv,n):[];
+    R={};
+    lab.comps.forEach(c=>{
+      const vd=V[node(c,1)]-V[node(c,0)];
+      let i;
+      if(c.type==="bat")i=(c.v-vd)/RINT;
+      else if(c.type==="led")i=c.on&&!c.burned?GL*(vd-c.vf):0;
+      else i=vd*cond(c);
+      R[c.id]={v:vd,i};
+    });
+    lab.cables.forEach(cb=>{const[a,b]=cn(cb);R[cb.id]={v:0,i:a===b?0:(V[a]-V[b])*GC}});
+    let changed=false;
+    lab.comps.forEach(c=>{
+      if(c.burned)return;
+      const r=R[c.id];
+      if((c.type==="bulb"||c.type==="motor"||c.type==="buzz")&&Math.abs(r.v)>1.25*c.vn){c.burned=true;c.burnV=Math.abs(r.v);changed=true}
+      if(c.type==="led"){
+        if(c.on&&r.i>0.04){c.burned=true;c.burnV=r.v;c.on=false;changed=true}
+        else if(c.on&&r.i<0){c.on=false;changed=true}
+        else if(!c.on&&r.v>c.vf+1e-6){c.on=true;changed=true}
+      }
+    });
+    if(!changed)break;
+  }
+  lab.res=R;
+  const mi=mechanics();
+  diagnose(node,mi);
+}
+
+/* ---- Cálculo mecánico ---- */
+function motorRpm(mo){const r=lab.res[mo.id];return mo.burned||!r?0:RPM_N*r.v/mo.vn}
+function mechanics(){
+  const om={}, issues=[], flag={};
+  const gk=p=>Math.round(p.x)+","+Math.round(p.y);
+  const groups=new Map();
+  const grp=k=>{if(!groups.has(k))groups.set(k,{parts:[],motor:null,adj:[]});return groups.get(k)};
+  lab.mech.forEach(m=>grp(gk(mpos(m))).parts.push(m));
+  lab.comps.forEach(c=>{if(c.type!=="motor")return;const G=groups.get(gk(c));if(G)G.motor=c;else om[c.id]=motorRpm(c)});
+  const linked=new Set(), overlaps=[];
+  const gears=lab.mech.filter(m=>m.type==="gear");
+  for(let i=0;i<gears.length;i++)for(let j=i+1;j<gears.length;j++){
+    const A=gears[i],B=gears[j],pa=mpos(A),pb=mpos(B),ka=gk(pa),kb=gk(pb);
+    if(ka===kb)continue;
+    const ra=mr(A),rb=mr(B),d=Math.hypot(pa.x-pb.x,pa.y-pb.y),s=ra+rb;
+    if(Math.abs(d-s)<2){groups.get(ka).adj.push({to:kb,f:-ra/rb});groups.get(kb).adj.push({to:ka,f:-rb/ra});linked.add(A.id);linked.add(B.id)}
+    else if(d<s-2)overlaps.push(A,B);
+  }
+  const badBands=[];
+  lab.bands.forEach(bd=>{
+    const A=mechById(bd.a),B=mechById(bd.b);if(!A||!B)return;
+    const g=bandGeom(bd);
+    if(!g||!g.ok){badBands.push(bd);return}
+    const ka=gk(mpos(A)),kb=gk(mpos(B)),ra=mr(A),rb=mr(B),sg=bd.cross?-1:1;
+    groups.get(ka).adj.push({to:kb,f:sg*ra/rb});groups.get(kb).adj.push({to:ka,f:sg*rb/ra});
+    linked.add(A.id);linked.add(B.id);
+  });
+  const seen=new Set();let idleTrains=0,jams=0;
+  for(const k0 of groups.keys()){
+    if(seen.has(k0))continue;
+    const comp=[k0];seen.add(k0);
+    for(let q=0;q<comp.length;q++)groups.get(comp[q]).adj.forEach(e=>{if(!seen.has(e.to)){seen.add(e.to);comp.push(e.to)}});
+    const sources=comp.filter(k=>groups.get(k).motor);
+    const rel={[comp[0]]:1};let jam=false;
+    const queue=[comp[0]];
+    while(queue.length){
+      const k=queue.shift();
+      groups.get(k).adj.forEach(e=>{
+        const val=rel[k]*e.f;
+        if(e.to in rel){if(Math.abs(rel[e.to]-val)>0.005*Math.max(1,Math.abs(val)))jam=true}
+        else{rel[e.to]=val;queue.push(e.to)}
+      });
+    }
+    const w={};
+    if(sources.length&&!jam){
+      const scale=motorRpm(groups.get(sources[0]).motor)/rel[sources[0]];
+      comp.forEach(k=>{w[k]=rel[k]*scale});
+      sources.forEach(k=>{const exp=motorRpm(groups.get(k).motor);if(Math.abs(w[k]-exp)>0.5+0.01*Math.abs(exp))jam=true});
+    }else if(!sources.length&&comp.length>1)idleTrains++;
+    comp.forEach(k=>{
+      const G=groups.get(k),val=jam||!(k in w)?0:w[k];
+      G.parts.forEach(m=>{om[m.id]=val;if(jam)flag[m.id]="err"});
+      if(G.motor){om[G.motor.id]=val;if(jam)flag[G.motor.id]="err"}
+    });
+    if(jam)jams++;
+  }
+  if(jams)issues.push({s:"err",h:"Engranajes trabados",t:"Una cadena de piezas obliga a girar en sentidos o velocidades opuestas al mismo tiempo, por eso no se mueve. Pasa, por ejemplo, con tres engranajes que se tocan formando un triángulo, o con dos motores moviendo la misma cadena."});
+  if(overlaps.length){
+    issues.push({s:"warn",h:"Engranajes superpuestos",t:"Hay engranajes montados uno encima del otro. No engranan: sepáralos hasta que solo se toquen los dientes."});
+    overlaps.forEach(m=>{if(flag[m.id]!=="err")flag[m.id]="warn"});
+  }
+  badBands.forEach(bd=>{flag[bd.id]="warn"});
+  if(badBands.length)issues.push({s:"warn",h:"Liga mal colocada",t:"Las poleas unidas por una liga están demasiado juntas o en el mismo eje. Sepáralas para que la liga quede tensa."});
+  const loose=lab.mech.filter(m=>{
+    const G=groups.get(gk(mpos(m)));
+    return !m.att&&!linked.has(m.id)&&G.parts.length===1&&!G.motor;
+  });
+  loose.forEach(m=>{if(!flag[m.id])flag[m.id]="warn"});
+  if(loose.length)issues.push({s:"warn",h:"Pieza suelta",t:loose.length>1?`${loose.length} piezas no están en el eje de un motor ni conectadas a otra pieza.`:`${mname(loose[0])} no está en el eje de un motor ni conectado a otra pieza. Ponlo sobre el eje del motor, hazlo engranar o únelo con una liga.`});
+  if(idleTrains)issues.push({s:"info",h:"Sin motor",t:"Hay piezas conectadas entre sí, pero ningún motor las mueve. Monta una de ellas sobre el eje de un motor."});
+  lab.omega=om;
+  return{issues,flag};
+}
+function bandGeom(bd){
+  const A=mechById(bd.a),B=mechById(bd.b);if(!A||!B)return null;
+  const c1=mpos(A),c2=mpos(B),r1=mr(A),r2=mr(B);
+  const dx=c2.x-c1.x,dy=c2.y-c1.y,d=Math.hypot(dx,dy),th=Math.atan2(dy,dx);
+  const ok=bd.cross?d>r1+r2+1:d>Math.abs(r1-r2)+1&&d>1;
+  if(!ok)return{ok:false,c1,c2};
+  const lines=[];
+  for(const s of[1,-1]){
+    if(bd.cross){const a=th+s*Math.acos((r1+r2)/d);lines.push([{x:c1.x+r1*Math.cos(a),y:c1.y+r1*Math.sin(a)},{x:c2.x-r2*Math.cos(a),y:c2.y-r2*Math.sin(a)}])}
+    else{const a=th+s*Math.acos((r1-r2)/d);lines.push([{x:c1.x+r1*Math.cos(a),y:c1.y+r1*Math.sin(a)},{x:c2.x+r2*Math.cos(a),y:c2.y+r2*Math.sin(a)}])}
+  }
+  return{ok:true,lines,c1,c2};
+}
+
+/* ---- Detección de errores ---- */
+function diagnose(node,mi){
+  const R=lab.res, issues=[...mi.issues], flag=Object.assign({},mi.flag);
+  const mark=(id,s)=>{if(flag[id]!=="err")flag[id]=s};
+  const bats=lab.comps.filter(c=>c.type==="bat");
+  if(!lab.comps.length&&!lab.cables.length&&!lab.mech.length)issues.push({s:"info",h:"Mesa vacía",t:"Arrastra una pila y otros componentes para empezar."});
+  else if(!bats.length&&lab.comps.length)issues.push({s:"info",h:"Sin energía",t:"Agrega una pila para dar voltaje al circuito."});
+
+  const handled=new Set();
+  for(let i=0;i<bats.length;i++)for(let j=i+1;j<bats.length;j++){
+    const A=bats[i],B=bats[j];
+    const a1=node(A,0),b1=node(A,1),a2=node(B,0),b2=node(B,1);
+    if(a1===b1||a2===b2)continue;
+    if(a1===a2&&b1===b2&&A.v!==B.v){
+      issues.push({s:"err",h:"Pilas en paralelo con distinto voltaje",t:`Una pila de ${fmt(A.v)} V y otra de ${fmt(B.v)} V están en paralelo. La de mayor voltaje descarga a la otra y ambas se calientan. En paralelo usa pilas del mismo voltaje.`});
+      [A,B].forEach(c=>{mark(c.id,"err");handled.add(c.id)});
+    }else if(a1===b2&&b1===a2){
+      issues.push({s:"err",h:"Pilas en paralelo invertidas",t:"El + de una pila está unido al − de la otra por ambos lados. Es un cortocircuito: invierte la polaridad de una de las pilas."});
+      [A,B].forEach(c=>{mark(c.id,"err");handled.add(c.id)});
+    }
+  }
+  const shorted=bats.filter(c=>!handled.has(c.id)&&Math.abs(R[c.id].i)*RINT>0.3*c.v);
+  if(shorted.length){
+    const who=shorted.length>1?`${shorted.length} pilas están conectadas`:`La pila de ${fmt(shorted[0].v)} V está conectada`;
+    issues.push({s:"err",h:"Cortocircuito",t:`${who} sin resistencia ni carga entre sus bornes, y su voltaje cae casi a 0 V. La pila se calentaría. Agrega una resistencia o una carga en el camino.`});
+    shorted.forEach(c=>mark(c.id,"err"));
+  }
+  lab.comps.filter(c=>c.burned).forEach(c=>{
+    let h,t;
+    if(c.type==="bulb"){h="Ampolleta quemada";t=`Recibió ${fmt(c.burnV||0)} V y solo soporta ${fmt(c.vn)} V. Reemplázala desde el panel y baja el voltaje o agrega una resistencia en serie.`}
+    if(c.type==="motor"){h="Motor quemado";t=`Recibió ${fmt(c.burnV||0)} V y solo soporta ${fmt(c.vn)} V. Reemplázalo desde el panel y baja el voltaje de la pila.`}
+    if(c.type==="buzz"){h="Zumbador quemado";t=`Recibió ${fmt(c.burnV||0)} V y solo soporta ${fmt(c.vn)} V. Reemplázalo desde el panel y baja el voltaje.`}
+    if(c.type==="led"){h="LED quemado";t=`Recibió ${fmt(c.burnV||0)} V y soporta como máximo ${fmt(c.vf+0.4)} V. Reemplázalo y agrega una resistencia en serie, por ejemplo de 470 Ω.`}
+    issues.push({s:"err",h,t});mark(c.id,"err");
+  });
+  lab.comps.filter(c=>c.type==="led"&&!c.burned&&R[c.id].v<-0.5).forEach(c=>{
+    issues.push({s:"warn",h:"LED invertido",t:"El LED está conectado al revés y no enciende. Su lado + (ánodo, borne rojo) debe ir hacia el + de la pila. Usa Invertir polaridad."});
+    mark(c.id,"warn");
+  });
+
+  const groups={};
+  lab.comps.forEach(c=>[0,1].forEach(t=>{const k=node(c,t);(groups[k]=groups[k]||[]).push({c,t})}));
+  Object.values(groups).forEach(g=>{
+    if(g.length===2&&g[0].c.type==="bat"&&g[1].c.type==="bat"&&g[0].c!==g[1].c&&g[0].t===g[1].t){
+      issues.push({s:"warn",h:"Pilas en serie invertidas",t:`Dos pilas están unidas ${g[0].t?"+ con +":"− con −"}, así sus voltajes se restan en vez de sumarse. Para sumarlos, une el + de una con el − de la otra.`});
+      mark(g[0].c.id,"warn");mark(g[1].c.id,"warn");
+    }
+  });
+
+  const occ={};const add=p=>{const k=key(p);occ[k]=(occ[k]||0)+1};
+  lab.comps.forEach(c=>{add(termPos(c,0));add(termPos(c,1))});
+  lab.cables.forEach(cb=>cb.e.forEach(e=>add(epos(e))));
+  lab.occ=occ;
+
+  const active=bats.filter(c=>Math.abs(R[c.id].i)>=1e-4);
+  if(bats.length&&!shorted.length&&!handled.size&&!active.length){
+    const openSw=lab.comps.filter(c=>c.type==="sw"&&!c.closed);
+    const burned=lab.comps.some(c=>c.burned);
+    let t="No circula corriente, así que ningún componente recibe voltaje. ";
+    if(openSw.length)t+="Hay un interruptor abierto: tócalo para cerrarlo.";
+    else if(burned)t+="Un componente quemado dejó el camino cortado.";
+    else t+="Revisa que exista un camino cerrado desde el + de la pila, pasando por los componentes, hasta su −.";
+    issues.push({s:"warn",h:"Circuito abierto",t});
+    openSw.forEach(c=>mark(c.id,"warn"));
+  }
+
+  const loose=lab.comps.filter(c=>occ[key(termPos(c,0))]<2||occ[key(termPos(c,1))]<2);
+  loose.forEach(c=>mark(c.id,"warn"));
+  if(loose.length>2)issues.push({s:"warn",h:"Componentes desconectados",t:`${loose.length} componentes tienen bornes sin conectar. Están marcados en amarillo.`});
+  else loose.forEach(c=>{
+    const free=(occ[key(termPos(c,0))]<2)+(occ[key(termPos(c,1))]<2);
+    issues.push({s:"warn",h:"Componente desconectado",t:`${cname(c)} tiene ${free===2?"sus dos bornes libres":"un borne sin conectar"}.`});
+  });
+  const looseCb=lab.cables.filter(cb=>cb.e.some(e=>occ[key(epos(e))]<2));
+  looseCb.forEach(cb=>mark(cb.id,"warn"));
+  if(looseCb.length)issues.push({s:"warn",h:"Cable suelto",t:looseCb.length>1?`${looseCb.length} cables tienen puntas sin conectar. Arrastra cada punta hasta un borne.`:"Un cable tiene una punta sin conectar. Arrastra la punta hasta un borne."});
+
+  if(active.length&&!issues.some(x=>x.s==="err")){
+    const clean=!issues.some(x=>x.s==="warn");
+    const vt=Math.max(...active.map(c=>Math.abs(R[c.id].v)));
+    issues.push({s:"ok",h:clean?"Circuito funcionando":"Circula corriente",t:`${clean?"El circuito está cerrado. ":""}Voltaje en bornes de la pila: ${fmt(vt)} V.`});
+  }
+  const order={err:0,warn:1,info:2,ok:3};
+  issues.sort((a,b)=>order[a.s]-order[b.s]);
+  lab.issues=issues;lab.flag=flag;
+}
+
+/* ---- Dibujo ---- */
+const ZIG="M-40 0H-24l4-9 8 18 8-18 8 18 8-18 8 18 4-9H40";
+const gearCache={};
+function gearPath(T,r){
+  const k=T+":"+r;if(gearCache[k])return gearCache[k];
+  const a=3.6,w=Math.PI/T,pts=[];
+  for(let i=0;i<T;i++){const t0=i*2*w;pts.push([r-a,t0-w*0.5],[r+a,t0-w*0.28],[r+a,t0+w*0.28],[r-a,t0+w*0.5])}
+  return gearCache[k]="M"+pts.map(([R,t])=>`${(R*Math.cos(t)).toFixed(1)} ${(R*Math.sin(t)).toFixed(1)}`).join("L")+"Z";
+}
+function brightness(c){
+  const r=lab.res[c.id];if(!r||c.burned)return 0;
+  if(c.type==="led")return Math.min(1,Math.max(0,r.i/0.02));
+  return Math.min(1,(r.v/c.vn)**2);
+}
+const buzzActive=c=>!c.burned&&lab.res[c.id]&&Math.abs(lab.res[c.id].v)>0.5*c.vn;
+function sym(c,br){
+  const L=(a,z)=>`<path d="M${a} 0H${z}"/>`;
+  switch(c.type){
+    case"bat":return L(-40,-26)+L(26,40)+
+      `<rect x="-26" y="-13" width="46" height="26" rx="4" fill="var(--copper)" stroke="none"/>`+
+      `<rect x="20" y="-6" width="6" height="12" rx="1.5" fill="var(--wire)" stroke="none"/>`+
+      `<path d="M-19 0h7M5 0h9M9.5-4.5v9" stroke="var(--cell-ink)" stroke-width="2"/>`;
+    case"res":return`<path d="${ZIG}" stroke-linejoin="round"/>`;
+    case"pot":return`<path d="${ZIG}" stroke-linejoin="round"/><path d="M-16 14L13-11M5-12h9v9" stroke="var(--copper)" stroke-linejoin="round"/>`;
+    case"sw":return L(-40,-16)+L(16,40)+
+      `<circle cx="-16" r="3.5" fill="var(--wire)" stroke="none"/><circle cx="16" r="3.5" fill="var(--wire)" stroke="none"/>`+
+      (c.closed?`<path d="M-16 0L16-1" stroke-width="3"/>`:`<path d="M-16 0L12-16" stroke-width="3"/>`);
+    case"bulb":{
+      const b=br||0;
+      return L(-40,-15)+L(15,40)+
+        `<circle r="26" fill="var(--glow)" opacity="${(b*0.5).toFixed(2)}" stroke="none"/>`+
+        `<circle r="15" fill="${c.burned?"var(--chip)":"var(--surface)"}"/>`+
+        (c.burned?`<path d="M-7-7L-2-2M7 7L2 2M7-7L2-2M-7 7L-2 2" stroke-width="2"/>`
+                 :`<circle r="9" fill="var(--glow)" opacity="${b.toFixed(2)}" stroke="none"/><path d="M-7-7L7 7M7-7L-7 7" stroke-width="2"/>`);
+    }
+    case"motor":
+      return L(-40,-18)+L(18,40)+`<circle r="18" fill="${c.burned?"var(--chip)":"var(--surface)"}"/>`+
+        (c.burned?`<path d="M-8-8L8 8M8-8L-8 8" stroke="var(--err)" stroke-width="2.5"/>`
+                 :`<g data-spin="${c.id}" transform="rotate(${(lab.ang[c.id]||0).toFixed(1)})"><path d="M-11 0H11M0-11V11" stroke="var(--copper)" stroke-width="3"/></g>`)+
+        `<circle r="3" fill="var(--wire)" stroke="none"/>`;
+    case"led":{
+      const b=br||0;
+      return L(-40,-8)+L(8,40)+
+        `<circle r="22" fill="var(--led)" opacity="${(b*0.45).toFixed(2)}" stroke="none"/>`+
+        `<path d="M8-10L-8 0L8 10Z" fill="${c.burned?"var(--chip)":b>0.05?"var(--led)":"var(--surface)"}" stroke-linejoin="round"/><path d="M-8-10V10"/>`+
+        (c.burned?`<path d="M-2-6L4 6" stroke="var(--err)" stroke-width="2"/>`:`<path d="M-1-14l-4-7M6-13l-2-8" stroke="var(--led)" stroke-width="2" opacity="${b.toFixed(2)}"/>`);
+    }
+    case"buzz":{
+      const on=br>0;
+      return L(-40,-15)+L(15,40)+`<circle r="15" fill="${c.burned?"var(--chip)":"var(--surface)"}"/><circle r="4" fill="var(--wire)" stroke="none"/>`+
+        `<g class="${on&&!RM?"waves":""}" opacity="${on?1:0.15}"><path d="M-6-20a8 8 0 0 1 12 0M-11-26a14 14 0 0 1 22 0" stroke-width="2"/></g>`;
+    }
+    case"cable":return`<path d="M-36 8C-18 8-18-8 0-8S18 8 36 8"/><circle cx="-36" cy="8" r="4" fill="var(--wire)" stroke="none"/><circle cx="36" cy="8" r="4" fill="var(--wire)" stroke="none"/>`;
+  }
+}
+function palIcon(t){
+  if(t==="gear")return`<path d="${gearPath(10,14)}" fill="var(--gear)" stroke="var(--wire)" stroke-width="1.5"/><circle r="3" fill="var(--wire)"/>`;
+  if(t==="pulley")return`<circle r="16" fill="var(--pulley)" stroke="var(--wire)" stroke-width="1.5"/><circle r="11" fill="none" stroke="var(--wire)" stroke-opacity=".5"/><circle r="3" fill="var(--wire)"/>`;
+  if(t==="band")return`<circle cx="-22" r="10" fill="none" stroke="var(--wire)" stroke-width="1.5"/><circle cx="22" r="14" fill="none" stroke="var(--wire)" stroke-width="1.5"/><path d="M-22-10L22-14M-22 10L22 14" stroke="var(--band)" stroke-width="3" stroke-linecap="round"/>`;
+  return`<g fill="none" stroke="var(--wire)" stroke-width="2.5" stroke-linecap="round">${sym(t==="cable"?{type:"cable"}:defaults(t),0.6)}</g>`;
+}
+
+function drawBoard(){
+  const{W,H,k,tx,ty}=lab;
+  let s=`<defs><pattern id="dots" x="-10" y="-10" width="${GRID}" height="${GRID}" patternUnits="userSpaceOnUse"><circle cx="10" cy="10" r="1.3" fill="var(--line)"/></pattern></defs>`+
+    `<rect data-kind="bg" width="${W}" height="${H}" fill="var(--chip)"/>`+
+    `<g transform="translate(${tx.toFixed(1)} ${ty.toFixed(1)}) scale(${k.toFixed(4)})">`+
+    `<rect data-kind="bg" width="${WW}" height="${WH}" fill="var(--bg)" stroke="var(--line)" stroke-width="2"/>`+
+    `<rect data-kind="bg" width="${WW}" height="${WH}" fill="url(#dots)"/>`;
+
+  lab.cables.forEach(cb=>{
+    const sel=lab.sel&&lab.sel.cb===cb.id, f=lab.flag[cb.id], d=cablePath(cb);
+    s+=`<path d="${d}" fill="none" stroke="${sel?"var(--copper)":f?"var(--warn)":"var(--wire)"}" stroke-width="${sel?4:2.5}" stroke-linejoin="round" stroke-linecap="round"/>`;
+    const i=(lab.res[cb.id]||{i:0}).i;
+    if(Math.abs(i)>1e-4)s+=`<path class="flow" d="${cablePath(cb,i<0)}" pointer-events="none"/>`;
+    s+=`<path data-kind="cable" data-id="${cb.id}" d="${d}" fill="none" stroke="rgba(0,0,0,0)" stroke-width="18" style="cursor:move"/>`;
+  });
+
+  lab.comps.forEach(c=>{
+    const f=lab.flag[c.id], sel=lab.sel&&lab.sel.c===c.id;
+    const br=c.type==="bulb"||c.type==="led"?brightness(c):c.type==="buzz"?(buzzActive(c)?1:0):0;
+    s+=`<g transform="translate(${c.x} ${c.y}) rotate(${c.rot})">`;
+    if(f||sel)s+=`<rect x="-36" y="-24" width="72" height="48" rx="9" fill="${f?`var(--${f})`:"none"}" fill-opacity="0.12" stroke="var(--${f||"copper"})" stroke-width="${sel?2:1.5}" ${sel?"":'stroke-dasharray="5 4"'}/>`;
+    s+=`<g fill="none" stroke="var(--wire)" stroke-width="2.5" stroke-linecap="round">${sym(c,br)}</g>`;
+    s+=`<rect data-kind="body" data-c="${c.id}" x="-30" y="-22" width="60" height="44" fill="rgba(0,0,0,0)" style="cursor:move"/>`;
+    [0,1].forEach(t=>{
+      const x=t?40:-40, pend=lab.pending&&lab.pending.c===c.id&&lab.pending.t===t;
+      const pos=(c.type==="bat"||c.type==="led"||c.type==="motor")&&t===1;
+      s+=`<circle cx="${x}" r="${pend?7:5}" fill="${pend?"var(--glow)":"var(--surface)"}" stroke="${pos?"var(--pos)":"var(--wire)"}" stroke-width="2"/>`;
+    });
+    s+=`</g>`;
+    const hz=c.rot%180===0;
+    s+=`<text x="${hz?c.x:c.x+24}" y="${hz?c.y+38:c.y+4}" text-anchor="${hz?"middle":"start"}" font-size="11" fill="var(--muted)" font-family="var(--f-mono)" pointer-events="none">${label(c)}</text>`;
+  });
+
+  lab.mech.forEach(m=>{
+    const p=mpos(m), r=mr(m), f=lab.flag[m.id], sel=lab.sel&&lab.sel.m===m.id, pend=lab.bandMode&&lab.bandMode.first===m.id;
+    const ang=(lab.ang[m.id]||0).toFixed(1), w=lab.omega[m.id]||0;
+    s+=`<g transform="translate(${p.x.toFixed(1)} ${p.y.toFixed(1)})">`;
+    if(f||sel||pend)s+=`<circle r="${r+10}" fill="${f?`var(--${f})`:"none"}" fill-opacity="0.12" stroke="var(--${f||"copper"})" stroke-width="2" ${sel||pend?"":'stroke-dasharray="5 4"'}/>`;
+    s+=`<g data-spin="${m.id}" transform="rotate(${ang})">`;
+    if(m.type==="gear"){
+      s+=`<path d="${gearPath(GEAR[m.size].t,r)}" fill="var(--gear)" stroke="var(--wire)" stroke-width="1.5" stroke-linejoin="round"/>`+
+         `<circle r="${(r*0.55).toFixed(1)}" fill="none" stroke="var(--wire)" stroke-opacity="0.35" stroke-width="1.5"/>`+
+         `<circle cx="${(r*0.72).toFixed(1)}" r="${Math.max(2.5,r*0.08).toFixed(1)}" fill="var(--copper)"/>`;
+    }else{
+      const sp=[0,120,240].map(a=>{const t=a*Math.PI/180;return`M0 0L${((r-6)*Math.cos(t)).toFixed(1)} ${((r-6)*Math.sin(t)).toFixed(1)}`}).join("");
+      s+=`<circle r="${r}" fill="var(--pulley)" stroke="var(--wire)" stroke-width="1.5"/><circle r="${r-5}" fill="none" stroke="var(--wire)" stroke-opacity="0.45"/>`+
+         `<path d="${sp}" stroke="var(--wire)" stroke-opacity="0.55" stroke-width="2"/>`;
+    }
+    s+=`</g><circle r="4.5" fill="var(--wire)"/><circle data-kind="mech" data-id="${m.id}" r="${r+4}" fill="rgba(0,0,0,0)" style="cursor:move"/></g>`;
+    const lb=(m.type==="gear"?`${GEAR[m.size].t} dientes`:`Polea ${PUL[m.size].n}`)+(Math.abs(w)>0.5?` · ${fmtRpm(w)}`:"");
+    s+=`<text x="${p.x.toFixed(1)}" y="${(p.y+r+17).toFixed(1)}" text-anchor="middle" font-size="11" fill="var(--muted)" font-family="var(--f-mono)" pointer-events="none">${lb}</text>`;
+  });
+
+  lab.bands.forEach(bd=>{
+    const g=bandGeom(bd);if(!g)return;
+    const sel=lab.sel&&lab.sel.b===bd.id, col=sel?"var(--copper)":g.ok?"var(--band)":"var(--warn)";
+    let d;
+    if(g.ok)d=g.lines.map(([a,b])=>`M${a.x.toFixed(1)} ${a.y.toFixed(1)}L${b.x.toFixed(1)} ${b.y.toFixed(1)}`).join("");
+    else d=`M${g.c1.x} ${g.c1.y}L${g.c2.x} ${g.c2.y}`;
+    s+=`<path d="${d}" fill="none" stroke="${col}" stroke-width="${sel?5:4}" stroke-linecap="round" ${g.ok?"":'stroke-dasharray="6 6"'}/>`+
+       `<path data-kind="band" data-id="${bd.id}" d="${d}" fill="none" stroke="rgba(0,0,0,0)" stroke-width="18" style="cursor:pointer"/>`;
+  });
+
+  lab.comps.forEach(c=>[0,1].forEach(t=>{
+    const p=termPos(c,t);
+    s+=`<circle data-kind="term" data-c="${c.id}" data-t="${t}" cx="${p.x}" cy="${p.y}" r="18" fill="rgba(0,0,0,0)" style="cursor:crosshair"/>`;
+  }));
+
+  lab.cables.forEach(cb=>{
+    const sel=lab.sel&&lab.sel.cb===cb.id;
+    cb.e.forEach((e,i)=>{
+      const p=epos(e), n=lab.occ[key(p)]||0;
+      if(n<2)s+=`<circle cx="${p.x}" cy="${p.y}" r="5" fill="var(--surface)" stroke="var(--warn)" stroke-width="2" pointer-events="none"/>`;
+      else if(n>2)s+=`<circle cx="${p.x}" cy="${p.y}" r="4" fill="var(--wire)" pointer-events="none"/>`;
+      if(sel)s+=`<circle cx="${p.x}" cy="${p.y}" r="9" fill="var(--copper)" fill-opacity="0.25" stroke="var(--copper)" stroke-width="2" pointer-events="none"/>`;
+      if(sel||n<2)s+=`<circle data-kind="end" data-id="${cb.id}" data-i="${i}" cx="${p.x}" cy="${p.y}" r="16" fill="rgba(0,0,0,0)" style="cursor:grab"/>`;
+    });
+  });
+
+  const sc=lab.sel&&lab.sel.c&&byId(lab.sel.c);
+  if(sc&&!lab.drag){
+    const hz=sc.rot%180===0, bx=hz?sc.x+46:sc.x+36, by=hz?sc.y-34:sc.y-46;
+    s+=`<g data-kind="rot" transform="translate(${bx} ${by})" style="cursor:pointer"><circle r="15" fill="var(--copper)"/>`+
+       `<path d="M5.5-3.5A6.5 6.5 0 1 0 6 3" fill="none" stroke="var(--cell-ink)" stroke-width="2.2" stroke-linecap="round"/>`+
+       `<path d="M7-8.5V-3H1.5" fill="none" stroke="var(--cell-ink)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></g>`;
+  }
+  if(lab.pending&&lab.ptr){
+    const pc=byId(lab.pending.c);
+    if(pc){const p=termPos(pc,lab.pending.t);s+=`<line x1="${p.x}" y1="${p.y}" x2="${lab.ptr.x}" y2="${lab.ptr.y}" stroke="var(--copper)" stroke-width="2" stroke-dasharray="5 5" pointer-events="none"/>`}
+  }
+  s+=`</g>`;
+  board.setAttribute("viewBox",`0 0 ${W} ${H}`);
+  board.innerHTML=s;
+}
+function drawStatus(){
+  let items=lab.issues;
+  if(lab.bandMode){
+    const pulleys=lab.mech.filter(m=>m.type==="pulley").length;
+    const t=pulleys<2?"Necesitas al menos dos poleas en la mesa. Toca el fondo para cancelar.":
+      lab.bandMode.first?"Ahora toca la segunda polea. Toca el fondo para cancelar.":"Toca la primera polea que unirá la liga. Toca el fondo para cancelar.";
+    items=[{s:"info",h:"Poniendo una liga",t},...items];
+  }
+  $("status").innerHTML=`<p class="label">Estado del circuito</p><ul class="issues">${items.map(x=>`<li class="${x.s}"><span><b>${x.h}.</b> ${x.t}</span></li>`).join("")}</ul>`;
+}
+function readingsHTML(c,r){
+  const V=fmt(Math.abs(r.v))+" V", A=fmtA(r.i);
+  switch(c.type){
+    case"bat":return cell("En bornes",V)+cell("Corriente",A)+cell("Potencia",fmtW(r.v*r.i));
+    case"bulb":case"led":return cell("Voltaje",V)+cell("Corriente",A)+cell("Brillo",Math.round(brightness(c)*100)+" %");
+    case"motor":{const w=lab.omega[c.id]||0;return cell("Voltaje",V)+cell("Corriente",A)+cell("Giro",Math.abs(w)>0.5?`${fmtRpm(w)} ${w>0?"↻":"↺"}`:"detenido")}
+    case"buzz":return cell("Voltaje",V)+cell("Corriente",A)+cell("Sonido",buzzActive(c)?"sonando":"en silencio");
+    default:return cell("Voltaje",V)+cell("Corriente",A)+cell("Potencia",fmtW(r.v*r.i));
+  }
+}
+function cableReadings(cb){
+  const r=lab.res[cb.id]||{i:0};
+  const loose=cb.e.filter(e=>(lab.occ[key(epos(e))]||0)<2).length;
+  return cell("Voltaje","0 V")+cell("Puntas",loose?`${loose} suelta${loose>1?"s":""}`:"conectadas")+cell("Estado",Math.abs(r.i)>1e-4?"con corriente":"sin corriente");
+}
+function mechReadings(m){
+  const w=lab.omega[m.id]||0;
+  return cell(m.type==="gear"?"Dientes":"Tamaño",m.type==="gear"?GEAR[m.size].t:PUL[m.size].n)+cell("Velocidad",Math.abs(w)>0.5?fmtRpm(w):"detenido")+cell("Sentido",Math.abs(w)>0.5?(w>0?"↻ horario":"↺ antihorario"):"—");
+}
+function bandReadings(bd){
+  const A=mechById(bd.a),B=mechById(bd.b);if(!A||!B)return"";
+  return cell("Relación",fmt(mr(A)/mr(B))+"×")+cell("Entrada",fmtRpm(lab.omega[A.id]||0))+cell("Salida",fmtRpm(lab.omega[B.id]||0));
+}
+function chips(act,vals,cur,f,lbl,extra){
+  return`<div class="ctrl"><p class="label">${lbl}</p><div class="chips">${vals.map(v=>`<button data-act="${act}" data-val="${v}" ${extra||""} aria-pressed="${v===cur}">${f(v)}</button>`).join("")}</div></div>`;
+}
+function voltCtl(c,prop,min,max,presets,lbl){
+  return`<div class="ctrl"><p class="label">${lbl}</p>`+
+    `<div class="vrow"><input type="range" id="vr-range" data-prop="${prop}" data-min="${min}" data-max="${max}" min="${min}" max="${max}" step="0.1" value="${c[prop]}" aria-label="${lbl}">`+
+    `<div class="vnum"><input type="text" inputmode="decimal" id="vr-num" data-prop="${prop}" data-min="${min}" data-max="${max}" value="${fmt(c[prop])}" aria-label="${lbl} en voltios"><span>V</span></div></div>`+
+    `<div class="chips">${presets.map(v=>`<button data-act="setprop" data-prop="${prop}" data-val="${v}" aria-pressed="${v===c[prop]}">${fmt(v)} V</button>`).join("")}</div></div>`;
+}
+function drawInspector(keep){
+  const el=$("inspector"), sel=lab.sel, ri=$("insp-read");
+  if(keep&&ri){
+    if(sel&&sel.c){
+      const c=byId(sel.c);if(!c)return;
+      ri.innerHTML=readingsHTML(c,lab.res[c.id]||{v:0,i:0});
+      const o=$("pot-out");if(o)o.textContent=fmtR(c.r);
+      const tt=$("insp-title");if(tt)tt.textContent=cname(c);
+      el.querySelectorAll('[data-act="setprop"]').forEach(b=>b.setAttribute("aria-pressed",parseFloat(b.dataset.val)===c[b.dataset.prop]));
+    }
+    else if(sel&&sel.cb){const cb=cabById(sel.cb);if(cb)ri.innerHTML=cableReadings(cb)}
+    else if(sel&&sel.m){const m=mechById(sel.m);if(m)ri.innerHTML=mechReadings(m)}
+    else if(sel&&sel.b){const b=bandById(sel.b);if(b)ri.innerHTML=bandReadings(b)}
+    return;
+  }
+  if(sel&&sel.cb){
+    const cb=cabById(sel.cb);
+    if(cb){
+      el.innerHTML=`<div class="insp"><h3>Cable</h3><div class="readings" id="insp-read">${cableReadings(cb)}</div>`+
+        chips("shape",["hv","vh","line"],cb.shape,v=>({hv:"En L horizontal",vh:"En L vertical",line:"Recto"})[v],"Forma")+
+        `<p class="labhint">Arrastra cada punta hasta un borne para conectarla. Puedes juntar varias puntas en un mismo punto para hacer una derivación.</p>`+
+        `<div class="row"><button class="btn danger" data-act="delcb">Eliminar cable</button></div></div>`;
+      return;
+    }
+  }
+  if(sel&&sel.m){
+    const m=mechById(sel.m);
+    if(m){
+      const sizes=m.type==="gear"?{s:"Pequeño · 10",m:"Mediano · 20",l:"Grande · 40"}:{s:"Pequeña",m:"Mediana",l:"Grande"};
+      el.innerHTML=`<div class="insp"><h3>${mname(m)}</h3><div class="readings" id="insp-read">${mechReadings(m)}</div>`+
+        chips("msize",["s","m","l"],m.size,v=>sizes[v],m.type==="gear"?"Tamaño (dientes)":"Tamaño")+
+        (m.att?`<p class="labhint">Está montado en el eje del motor y gira con él.</p>`:`<p class="labhint">${m.type==="gear"?"Acércalo a otro engranaje hasta que encajen los dientes, o ponlo sobre el eje de un motor.":"Ponla sobre el eje de un motor o de un engranaje, y únela a otra polea con una liga."}</p>`)+
+        `<div class="row">${m.type==="pulley"?`<button class="btn primary" data-act="bandfrom">Poner liga desde aquí</button>`:""}${m.att?`<button class="btn" data-act="selmotor">Ver motor</button>`:""}<button class="btn danger" data-act="delm">Eliminar</button></div></div>`;
+      return;
+    }
+  }
+  if(sel&&sel.b){
+    const bd=bandById(sel.b);
+    if(bd){
+      el.innerHTML=`<div class="insp"><h3>Liga</h3><div class="readings" id="insp-read">${bandReadings(bd)}</div>`+
+        chips("btype",["0","1"],bd.cross?"1":"0",v=>v==="1"?"Cruzada (invierte el giro)":"Normal (mismo giro)","Tipo")+
+        `<div class="row"><button class="btn danger" data-act="delb">Eliminar liga</button></div></div>`;
+      return;
+    }
+  }
+  const c=sel&&sel.c&&byId(sel.c);
+  if(!c){el.innerHTML=`<div class="insp"><h3>Inspector</h3><p class="labhint">Toca un componente, un cable o una pieza para ver su voltaje y sus valores, y para editarlo.</p></div>`;return}
+  const r=lab.res[c.id]||{v:0,i:0};
+  let ctl="";
+  if(c.type==="bat")ctl=voltCtl(c,"v",0.5,24,[1.5,3.7,9,12],"Voltaje de la pila");
+  if(c.type==="res")ctl=chips("setr",[10,100,470,1000],c.r,fmtR,"Resistencia");
+  if(c.type==="bulb")ctl=voltCtl(c,"vn",1.5,24,[3,6,12],"Voltaje que soporta");
+  if(c.type==="motor")ctl=voltCtl(c,"vn",1.5,24,[3,6,12],"Voltaje nominal del motor");
+  if(c.type==="buzz")ctl=voltCtl(c,"vn",1.5,24,[3,5,12],"Voltaje que soporta");
+  if(c.type==="led")ctl=voltCtl(c,"vf",1.5,3.5,[1.8,2,3],"Voltaje de encendido");
+  if(c.type==="pot")ctl=`<div class="ctrl"><p class="label">Resistencia: <span id="pot-out">${fmtR(c.r)}</span></p><input type="range" id="pot-range" min="0" max="1000" step="10" value="${c.r}" aria-label="Resistencia del potenciómetro"></div>`;
+  if(c.type==="sw")ctl=`<div class="row"><button class="btn primary" data-act="toggle">${c.closed?"Abrir interruptor":"Cerrar interruptor"}</button></div>`;
+  if(c.burned)ctl+=`<div class="row"><button class="btn primary" data-act="replace">Reemplazar</button></div>`;
+  if(c.type==="motor"&&!c.burned)ctl+=`<p class="labhint">Pon un engranaje o una polea sobre su eje (el centro) para que lo haga girar.</p>`;
+  const canFlip=c.type==="bat"||c.type==="motor"||c.type==="led";
+  el.innerHTML=`<div class="insp"><h3 id="insp-title">${cname(c)}</h3><div class="readings" id="insp-read">${readingsHTML(c,r)}</div>${ctl}`+
+    `<div class="row"><button class="btn" data-act="rot">⟳ Girar 90°</button>${canFlip?`<button class="btn" data-act="flip">Invertir polaridad</button>`:""}<button class="btn danger" data-act="del">Eliminar</button></div></div>`;
+}
+function labRender(keep){
+  const W=$("boardwrap").clientWidth, H=board.clientHeight||460;
+  if(!W)return;
+  lab.W=W;lab.H=H;
+  if(lab.needFit){lab.needFit=false;computeFit()}
+  clampPan();
+  lab.comps.forEach(clampComp);
+  simulate();
+  drawBoard();drawStatus();
+  const sk=lab.sel?(lab.sel.c?"c"+lab.sel.c:lab.sel.cb?"w"+lab.sel.cb:lab.sel.m?"m"+lab.sel.m:"b"+lab.sel.b):"";
+  drawInspector(keep||(!!lab.drag&&sk===lab.lastSk));
+  lab.lastSk=sk;
+  $("z-val").textContent=Math.round(lab.k*100)+"%";
+  updateSound();startSpin();
+}
+function req(){if(!raf)raf=requestAnimationFrame(()=>{raf=0;labRender()})}
+
+/* ---- Animación de giro y sonido ---- */
+function spinTick(t){
+  spinRaf=0;
+  const dt=spinLast?Math.min(0.05,(t-spinLast)/1000):0;spinLast=t;
+  let any=false;
+  for(const id in lab.omega){const w=lab.omega[id];if(Math.abs(w)>0.5){any=true;lab.ang[id]=((lab.ang[id]||0)+w*6*dt)%360}}
+  if(!any||st.mode!=="lab"){spinLast=0;return}
+  board.querySelectorAll("[data-spin]").forEach(el=>el.setAttribute("transform",`rotate(${(lab.ang[el.dataset.spin]||0).toFixed(1)})`));
+  spinRaf=requestAnimationFrame(spinTick);
+}
+function startSpin(){if(!RM&&!spinRaf)spinRaf=requestAnimationFrame(spinTick)}
+let actx=null,osc=null,gain=null;
+function updateSound(){
+  if(!actx)return;
+  const bz=lab.comps.filter(c=>c.type==="buzz"&&buzzActive(c));
+  const on=lab.sound&&st.mode==="lab"&&bz.length>0;
+  try{
+    if(on){const ratio=Math.max(...bz.map(c=>Math.abs(lab.res[c.id].v)/c.vn));osc.frequency.setTargetAtTime(1200+700*Math.min(1.25,ratio),actx.currentTime,0.02)}
+    gain.gain.setTargetAtTime(on?0.035:0,actx.currentTime,0.02);
+  }catch(e){}
+}
+
+/* ---- Interacción ---- */
+function tapComp(c){
+  const now=performance.now();
+  if(lastTap.id===c.id&&now-lastTap.t<350){
+    lastTap={id:0,t:0};
+    if(c.type==="sw")c.closed=!c.closed;
+    rotateComp(c);return;
+  }
+  lastTap={id:c.id,t:now};
+  if(c.type==="sw")c.closed=!c.closed;
+}
+function bandTap(m){
+  const bm=lab.bandMode;
+  if(m.type!=="pulley")return;
+  if(!bm.first){bm.first=m.id;return}
+  if(bm.first===m.id)return;
+  const exists=lab.bands.some(b=>(b.a===bm.first&&b.b===m.id)||(b.b===bm.first&&b.a===m.id));
+  if(!exists){const bd={id:lab.nextId++,a:bm.first,b:m.id,cross:false};lab.bands.push(bd);lab.sel={b:bd.id}}
+  lab.bandMode=null;
+}
+function startPinch(){
+  const[a,b]=[...pointers.values()];
+  const r=board.getBoundingClientRect();
+  const mx=(a.x+b.x)/2-r.left, my=(a.y+b.y)/2-r.top;
+  lab.pinch={d0:Math.hypot(a.x-b.x,a.y-b.y)||1,k0:lab.k,wx:(mx-lab.tx)/lab.k,wy:(my-lab.ty)/lab.k};
+  lab.drag=null;stopEdge();
+}
+function updatePinch(){
+  const[a,b]=[...pointers.values()];
+  const r=board.getBoundingClientRect(), p=lab.pinch;
+  const mx=(a.x+b.x)/2-r.left, my=(a.y+b.y)/2-r.top;
+  const nk=Math.min(2.5,Math.max(0.35,p.k0*Math.hypot(a.x-b.x,a.y-b.y)/p.d0));
+  lab.k=nk;lab.tx=mx-p.wx*nk;lab.ty=my-p.wy*nk;clampPan();req();
+}
+function applyDrag(){
+  const d=lab.drag;if(!d||!lastScreen)return;
+  const w=toWorld(lastScreen.x,lastScreen.y);
+  if(d.kind==="pan"){lab.tx=d.tx0+(lastScreen.x-d.sx);lab.ty=d.ty0+(lastScreen.y-d.sy);clampPan()}
+  else if(d.kind==="move"){d.c.x=w.x+d.dx;d.c.y=w.y+d.dy;clampComp(d.c)}
+  else if(d.kind==="mmove"){const p=mechSnap(d.m,{x:w.x+d.dx,y:w.y+d.dy});d.m.x=p.x;d.m.y=p.y;d.m.att=p.att}
+  else if(d.kind==="end"){const e=d.cb.e[d.i];e.att=null;const sp=snapTarget(w,d.cb,d.i);e.x=sp.x;e.y=sp.y}
+  else if(d.kind==="cmove"){
+    d.cb.e.forEach((e,i)=>{const o=i?d.o1:d.o0;const p=clampPt({x:w.x+o.x,y:w.y+o.y});e.att=null;e.x=p.x;e.y=p.y});
+  }
+  else if(d.kind==="wire")lab.ptr=w;
+  req();
+}
+function edgeTick(){
+  edgeRaf=0;
+  const d=lab.drag;
+  if(!d||d.kind==="pan"||!lastScreen)return;
+  const r=board.getBoundingClientRect(), m=30, sp=9;
+  const inside=lastScreen.x>=r.left&&lastScreen.x<=r.right&&lastScreen.y>=r.top&&lastScreen.y<=r.bottom;
+  if(inside){
+    let vx=0,vy=0;
+    if(lastScreen.x<r.left+m)vx=sp;else if(lastScreen.x>r.right-m)vx=-sp;
+    if(lastScreen.y<r.top+m)vy=sp;else if(lastScreen.y>r.bottom-m)vy=-sp;
+    if(vx||vy){const ox=lab.tx,oy=lab.ty;lab.tx+=vx;lab.ty+=vy;clampPan();if(lab.tx!==ox||lab.ty!==oy)applyDrag()}
+  }
+  edgeRaf=requestAnimationFrame(edgeTick);
+}
+function startEdge(){if(!edgeRaf)edgeRaf=requestAnimationFrame(edgeTick)}
+function stopEdge(){if(edgeRaf)cancelAnimationFrame(edgeRaf);edgeRaf=0}
+
+board.addEventListener("pointerdown",e=>{
+  if(e.button>0)return;
+  try{board.setPointerCapture(e.pointerId)}catch(_){}
+  pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  if(pointers.size===2){startPinch();return}
+  if(pointers.size>2)return;
+  const el=e.target.closest("[data-kind]"), kind=el?el.dataset.kind:"bg", w=toWorld(e.clientX,e.clientY);
+  lastScreen={x:e.clientX,y:e.clientY};
+  const base={sx:e.clientX,sy:e.clientY,moved:false,pid:e.pointerId};
+  e.preventDefault();
+  if(kind==="rot"){const c=lab.sel&&byId(lab.sel.c);if(c)rotateComp(c);req();return}
+  if(kind==="end"){const cb=cabById(+el.dataset.id);lab.sel={cb:cb.id};lab.pending=null;lab.drag={...base,kind:"end",cb,i:+el.dataset.i};req();return}
+  if(kind==="term"){
+    const c=+el.dataset.c,t=+el.dataset.t;
+    lab.bandMode=null;
+    if(lab.pending&&!(lab.pending.c===c&&lab.pending.t===t)){connectTerms(lab.pending,{c,t});lab.pending=null;lab.ptr=null;req();return}
+    if(lab.pending){lab.pending=null;lab.ptr=null;req();return}
+    lab.pending={c,t};lab.ptr=termPos(byId(c),t);lab.sel=null;
+    lab.drag={...base,kind:"wire"};req();return;
+  }
+  if(kind==="body"){const c=byId(+el.dataset.c);lab.drag={...base,kind:"move",c,dx:c.x-w.x,dy:c.y-w.y};return}
+  if(kind==="mech"){const m=mechById(+el.dataset.id),p=mpos(m);lab.drag={...base,kind:"mmove",m,dx:p.x-w.x,dy:p.y-w.y};return}
+  if(kind==="band"){lab.sel={b:+el.dataset.id};lab.pending=null;lab.bandMode=null;req();return}
+  if(kind==="cable"){
+    const cb=cabById(+el.dataset.id);lab.sel={cb:cb.id};lab.pending=null;
+    const p0=epos(cb.e[0]),p1=epos(cb.e[1]);
+    lab.drag={...base,kind:"cmove",cb,o0:{x:p0.x-w.x,y:p0.y-w.y},o1:{x:p1.x-w.x,y:p1.y-w.y}};
+    req();return;
+  }
+  lab.drag={...base,kind:"pan",tx0:lab.tx,ty0:lab.ty};
+});
+document.addEventListener("pointermove",e=>{
+  if(pointers.has(e.pointerId))pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  if(lab.pinch){if(pointers.size>=2)updatePinch();return}
+  const d=lab.drag;
+  if(!d){
+    if(lab.pending&&e.pointerType==="mouse"&&st.mode==="lab"){lab.ptr=toWorld(e.clientX,e.clientY);req()}
+    return;
+  }
+  if(d.pid!==e.pointerId)return;
+  lastScreen={x:e.clientX,y:e.clientY};
+  if(!d.moved&&Math.hypot(e.clientX-d.sx,e.clientY-d.sy)>5)d.moved=true;
+  if(!d.moved)return;
+  applyDrag();
+  if(d.kind!=="pan")startEdge();
+});
+function onUp(e,cancel){
+  pointers.delete(e.pointerId);
+  if(lab.pinch){if(pointers.size<2)lab.pinch=null;lab.drag=null;req();return}
+  const d=lab.drag;if(!d||d.pid!==e.pointerId)return;
+  lab.drag=null;stopEdge();
+  if(d.kind==="pan"){if(!d.moved&&!cancel){lab.sel=null;lab.pending=null;lab.ptr=null;lab.bandMode=null}}
+  else if(d.kind==="move"){
+    if(!d.moved&&!cancel){
+      if(d.isNew){const f=findFree();d.c.x=f.x;d.c.y=f.y;clampComp(d.c)}
+      else tapComp(d.c);
+    }
+    reattach();lab.sel={c:d.c.id};
+  }
+  else if(d.kind==="mmove"){
+    if(!d.moved&&!cancel){
+      if(d.isNew){const f=findFree(mr(d.m));d.m.x=f.x;d.m.y=f.y;lab.sel={m:d.m.id}}
+      else if(lab.bandMode)bandTap(d.m);
+      else lab.sel={m:d.m.id};
+    }else lab.sel={m:d.m.id};
+  }
+  else if(d.kind==="end"){const en=d.cb.e[d.i];if(!en.att)en.att=termAt({x:en.x,y:en.y})}
+  else if(d.kind==="cmove"){
+    if(!d.moved&&d.isNew){const f=findFree();d.cb.e[0].x=f.x-40;d.cb.e[0].y=f.y;d.cb.e[1].x=f.x+40;d.cb.e[1].y=f.y}
+    if(d.moved||d.isNew)reattach();
+  }
+  else if(d.kind==="wire"&&!cancel&&lab.pending){
+    const w=toWorld(e.clientX,e.clientY), sp=snapTarget(w,null,-1);
+    if(sp.term){
+      if(!(sp.term.c===lab.pending.c&&sp.term.t===lab.pending.t)){connectTerms(lab.pending,sp.term);lab.pending=null;lab.ptr=null}
+    }else if(Math.hypot(e.clientX-d.sx,e.clientY-d.sy)>12){
+      const A=byId(lab.pending.c);
+      const cb=newCable(termPos(A,lab.pending.t),{x:sp.x,y:sp.y},{c:lab.pending.c,t:lab.pending.t},null);
+      lab.pending=null;lab.ptr=null;lab.sel={cb:cb.id};
+    }
+  }
+  req();
+}
+document.addEventListener("pointerup",e=>onUp(e,false));
+document.addEventListener("pointercancel",e=>onUp(e,true));
+board.addEventListener("wheel",e=>{
+  e.preventDefault();
+  const r=board.getBoundingClientRect();
+  zoomAt(e.clientX-r.left,e.clientY-r.top,lab.k*Math.exp(-e.deltaY*0.0015));
+},{passive:false});
+
+const PAL_E=[["cable","Cable"],["bat","Pila"],["res","Resistencia"],["pot","Potenciómetro"],["sw","Interruptor"],["bulb","Ampolleta"],["motor","Motor"],["led","LED"],["buzz","Zumbador"]];
+const PAL_M=[["gear","Engranaje"],["pulley","Polea"],["band","Liga"]];
+const palBtn=([t,n])=>`<button data-add="${t}" aria-label="Agregar ${n.toLowerCase()}"><svg viewBox="-44 -22 88 44">${palIcon(t)}</svg>${n}</button>`;
+$("palette").innerHTML=`<div class="palgroup"><p class="label">Eléctricos</p><div class="palrow">${PAL_E.map(palBtn).join("")}</div></div>`+
+  `<div class="palgroup"><p class="label">Mecánicos</p><div class="palrow">${PAL_M.map(palBtn).join("")}</div></div>`;
+function addFromPalette(type,w,drag){
+  lab.pending=null;
+  if(type==="band"){lab.bandMode={first:null};lab.sel=null;return}
+  lab.bandMode=null;
+  if(type==="cable"){
+    const a=clampPt({x:w.x-40,y:w.y}),b=clampPt({x:w.x+40,y:w.y});
+    const cb=newCable(a,b,null,null);lab.sel={cb:cb.id};
+    if(drag)lab.drag={...drag,kind:"cmove",cb,o0:{x:-40,y:0},o1:{x:40,y:0},isNew:true};
+  }else if(type==="gear"||type==="pulley"){
+    const m=newMech(type,w.x,w.y);const p=mechSnap(m,w);m.x=p.x;m.y=p.y;m.att=p.att;lab.sel={m:m.id};
+    if(drag)lab.drag={...drag,kind:"mmove",m,dx:0,dy:0,isNew:true};
+  }else{
+    const c=newComp(type,w.x,w.y);clampComp(c);lab.sel={c:c.id};
+    if(drag)lab.drag={...drag,kind:"move",c,dx:0,dy:0,isNew:true};
+  }
+}
+$("palette").addEventListener("pointerdown",e=>{
+  const b=e.target.closest("button[data-add]");if(!b||e.button>0)return;
+  e.preventDefault();
+  if(b.dataset.add==="band"){addFromPalette("band");req();return}
+  try{b.setPointerCapture(e.pointerId)}catch(_){}
+  lastScreen={x:e.clientX,y:e.clientY};
+  addFromPalette(b.dataset.add,toWorld(e.clientX,e.clientY),{sx:e.clientX,sy:e.clientY,moved:false,pid:e.pointerId});
+  req();
+});
+$("palette").addEventListener("keydown",e=>{
+  const b=e.target.closest("button[data-add]");
+  if(b&&(e.key==="Enter"||e.key===" ")){
+    e.preventDefault();const t=b.dataset.add;
+    addFromPalette(t,findFree(t==="gear"?40:t==="pulley"?28:40),null);reattach();req();
+  }
+});
+
+$("inspector").addEventListener("click",e=>{
+  const b=e.target.closest("[data-act]");if(!b)return;
+  const a=b.dataset.act, val=parseFloat(b.dataset.val), sel=lab.sel||{};
+  const c=sel.c&&byId(sel.c), m=sel.m&&mechById(sel.m), bd=sel.b&&bandById(sel.b);
+  if(a==="delcb"){lab.cables=lab.cables.filter(x=>x.id!==sel.cb);lab.sel=null}
+  else if(a==="shape"){const cb=cabById(sel.cb);if(cb)cb.shape=b.dataset.val}
+  else if(m){
+    if(a==="msize")m.size=b.dataset.val;
+    if(a==="delm")removeMech(m.id);
+    if(a==="bandfrom"){lab.bandMode={first:m.id}}
+    if(a==="selmotor"&&m.att)lab.sel={c:m.att};
+  }
+  else if(bd){
+    if(a==="btype")bd.cross=b.dataset.val==="1";
+    if(a==="delb"){lab.bands=lab.bands.filter(x=>x.id!==bd.id);lab.sel=null}
+  }
+  else if(c){
+    if(a==="rot")rotateComp(c);
+    if(a==="flip")flipComp(c);
+    if(a==="del")removeComp(c.id);
+    if(a==="setprop")c[b.dataset.prop]=val;
+    if(a==="setr")c.r=val;
+    if(a==="toggle")c.closed=!c.closed;
+    if(a==="replace"){c.burned=false;c.on=false}
+  }
+  labRender();
+});
+$("inspector").addEventListener("input",e=>{
+  const t=e.target, c=lab.sel&&lab.sel.c&&byId(lab.sel.c);
+  if(!c)return;
+  if(t.id==="pot-range"){c.r=+t.value;labRender(true);return}
+  if(t.id==="vr-range"||t.id==="vr-num"){
+    let v=t.id==="vr-range"?+t.value:parseFloat(String(t.value).replace(",","."));
+    if(!isFinite(v))return;
+    v=Math.round(Math.min(+t.dataset.max,Math.max(+t.dataset.min,v))*10)/10;
+    c[t.dataset.prop]=v;
+    if(t.id==="vr-range"){const n=$("vr-num");if(n)n.value=fmt(v)}else{const r=$("vr-range");if(r)r.value=v}
+    labRender(true);
+  }
+});
+$("inspector").addEventListener("change",e=>{
+  if(e.target.id==="vr-num"){const c=lab.sel&&lab.sel.c&&byId(lab.sel.c);if(c)e.target.value=fmt(c[e.target.dataset.prop])}
+});
+document.addEventListener("keydown",e=>{
+  if(st.mode!=="lab"||e.target.matches("input,textarea"))return;
+  if(e.key==="Escape"){lab.pending=null;lab.ptr=null;lab.sel=null;lab.bandMode=null;labRender()}
+  if((e.key==="r"||e.key==="R")&&lab.sel&&lab.sel.c){const c=byId(lab.sel.c);if(c){rotateComp(c);labRender()}}
+  if((e.key==="Delete"||e.key==="Backspace")&&lab.sel){
+    const s=lab.sel;
+    if(s.c)removeComp(s.c);
+    else if(s.cb){lab.cables=lab.cables.filter(x=>x.id!==s.cb);lab.sel=null}
+    else if(s.m)removeMech(s.m);
+    else if(s.b){lab.bands=lab.bands.filter(x=>x.id!==s.b);lab.sel=null}
+    labRender();
+  }
+});
+$("z-in").addEventListener("click",()=>zoomAt(lab.W/2,lab.H/2,lab.k*1.25));
+$("z-out").addEventListener("click",()=>zoomAt(lab.W/2,lab.H/2,lab.k/1.25));
+$("z-fit").addEventListener("click",()=>{computeFit();req()});
+$("z-tall").addEventListener("click",e=>{
+  lab.tall=!lab.tall;
+  $("boardwrap").classList.toggle("tall",lab.tall);
+  e.currentTarget.textContent=lab.tall?"Mesa normal":"Mesa alta";
+  e.currentTarget.setAttribute("aria-pressed",lab.tall);
+  requestAnimationFrame(()=>labRender());
+});
+$("lab-sound").addEventListener("click",e=>{
+  const b=e.currentTarget;
+  try{
+    if(!actx){
+      const AC=window.AudioContext||window.webkitAudioContext;
+      actx=new AC();osc=actx.createOscillator();osc.type="square";osc.frequency.value=1800;
+      gain=actx.createGain();gain.gain.value=0;osc.connect(gain);gain.connect(actx.destination);osc.start();
+    }
+    actx.resume();
+  }catch(_){b.textContent="Sonido no disponible";b.disabled=true;return}
+  lab.sound=!lab.sound;
+  b.textContent=lab.sound?"Sonido: sí":"Sonido: no";
+  b.setAttribute("aria-pressed",lab.sound);
+  updateSound();
+});
+$("lab-ex-motor").addEventListener("click",()=>{loadMotorExample();labRender()});
+$("lab-ex-bulb").addEventListener("click",()=>{loadBulbExample();labRender()});
+let clearArmed=null;
+$("lab-clear").addEventListener("click",e=>{
+  const b=e.currentTarget;
+  if(clearArmed){
+    clearTimeout(clearArmed);clearArmed=null;b.textContent="Limpiar mesa";
+    resetBoard();labRender();
+  }else{
+    b.textContent="¿Seguro? Toca otra vez";
+    clearArmed=setTimeout(()=>{clearArmed=null;b.textContent="Limpiar mesa"},3000);
+  }
+});
+try{new ResizeObserver(()=>{if(st.mode==="lab"&&!lab.drag)labRender()}).observe($("boardwrap"))}catch(e){}
+
+loadMotorExample();
+const h=(location.hash||"").slice(1);
+if(GUIDE[h]||h==="lab")st.mode=h;
+render();
+</script>
+
+</body></html>

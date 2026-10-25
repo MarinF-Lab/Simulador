@@ -190,6 +190,21 @@ function SizeEditor({ id }: { id: number }) {
   );
 }
 
+/** Recuadro plegable "¿Qué es?" con la descripción de la pieza. */
+function WhatIsIt({ desc }: { desc: string }) {
+  const open = useUI((s) => s.showInfo);
+  const setOpen = useUI((s) => s.setShowInfo);
+  return (
+    <section className="rounded-xl border border-accent/30 bg-accent/10 px-3 py-2">
+      <button onClick={() => setOpen(!open)} aria-expanded={open} className="flex min-h-9 w-full items-center justify-between text-left text-xs font-semibold tracking-widest text-ink/80 uppercase">
+        ¿Qué es?
+        <ChevronDown className={"size-4 transition-transform " + (open ? "" : "-rotate-90")} aria-hidden="true" />
+      </button>
+      {open && <p className="pb-1 text-sm leading-snug text-ink/90">{desc}</p>}
+    </section>
+  );
+}
+
 function Placement({ id }: { id: number }) {
   const part = useProject((s) => s.project.parts.find((p) => p.id === id));
   const { setZ, rotate, rotAxis, setRotAxis } = useProject();
@@ -369,6 +384,7 @@ function BeltPanel({ id }: { id: number }) {
           <Trash2 className="size-5" />
         </button>
       </div>
+      <WhatIsIt desc={findItem("belt")!.desc} />
       <section className="rounded-xl border border-line px-3 py-2">
         <h3 className="pb-2 text-xs font-semibold tracking-widest text-muted uppercase">Lecturas</h3>
         <div className="grid grid-cols-3 gap-2 pb-1">
@@ -403,6 +419,7 @@ function JointPanel({ id }: { id: number }) {
           <Trash2 className="size-5" />
         </button>
       </div>
+      <WhatIsIt desc={findItem(joint.kind === "revolute" ? "joint" : "bolt")!.desc.replace(/^Herramienta: /, "")} />
       <div className="flex gap-2">
         {(["revolute", "fixed"] as const).map((k) => (
           <button key={k} onClick={() => setJointKind(id, k)} aria-pressed={joint.kind === k} className={"min-h-11 flex-1 rounded-lg border px-3 text-sm font-medium " + (joint.kind === k ? "border-accent bg-accent text-accent-ink" : "border-line")}>
@@ -436,6 +453,7 @@ function CablePanel({ id }: { id: number }) {
           <Trash2 className="size-5" />
         </button>
       </div>
+      <WhatIsIt desc={findItem("wire")!.desc} />
       <section className="rounded-xl border border-line px-3 py-2">
         <h3 className="pb-2 text-xs font-semibold tracking-widest text-muted uppercase">Lecturas</h3>
         <div className="grid grid-cols-3 gap-2 pb-1">
@@ -481,6 +499,8 @@ export function Properties() {
             <Trash2 className="size-5" />
           </button>
         </div>
+
+        <WhatIsIt desc={item.desc} />
 
         {burned && (
           <div className="flex items-center gap-3 rounded-xl border border-err/50 bg-err/10 p-3 text-sm">

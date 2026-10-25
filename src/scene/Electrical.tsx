@@ -4,6 +4,7 @@ import * as THREE from "three";
 import type { Cable, Project } from "../core/model/project";
 import { endPos, POLAR, posKey, TERMINALS, termWorld } from "../core/model/terminals";
 import { useProject } from "../store/project";
+import { cableMid, curveOf } from "./cableCurve";
 import { useUI } from "../store/ui";
 
 // Bornes (esferas) y cables (tubos curvos). Rojo = lado +, azul = lado −.
@@ -39,15 +40,6 @@ export function Terminals() {
   );
 }
 
-/** Curva del cable: sube desde cada punta y hace un arco. */
-function curveOf(a: THREE.Vector3, b: THREE.Vector3): THREE.CatmullRomCurve3 {
-  const d = a.distanceTo(b);
-  const lift = Math.min(60, Math.max(10, d * 0.28));
-  const up = new THREE.Vector3(0, 0, lift);
-  const m = a.clone().lerp(b, 0.5).add(new THREE.Vector3(0, 0, lift * 1.25));
-  return new THREE.CatmullRomCurve3([a, a.clone().add(up.clone().multiplyScalar(0.6)), m, b.clone().add(up.clone().multiplyScalar(0.6)), b], false, "centripetal");
-}
-
 let dashTex: THREE.CanvasTexture | null = null;
 function dashTexture(): THREE.CanvasTexture {
   if (dashTex) return dashTex;
@@ -68,9 +60,9 @@ const reduced = (() => {
 
 function CableMesh({ cable, project, color, flow, selected }: { cable: Cable; project: Project; color: string; flow: number; selected: boolean }) {
   const a = endPos(project, cable.ends[0]), b = endPos(project, cable.ends[1]);
-  const key = a.join() + "|" + b.join();
+  const key = a.join() + "|" + b.join() + "|" + (cable.bend?.join() ?? "");
   const { geo, flowGeo, len } = useMemo(() => {
-    const curve = curveOf(new THREE.Vector3(...a), new THREE.Vector3(...b));
+    const curve = curveOf(new THREE.Vector3(...a), new THREE.Vector3(...b), cable.bend);
     return { geo: new THREE.TubeGeometry(curve, 32, 1.7, 8, false), flowGeo: new THREE.TubeGeometry(curve, 32, 2.3, 8, false), len: curve.getLength() };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
@@ -138,6 +130,24 @@ export function CableEnds() {
           );
         }),
       )}
+    </group>
+  );
+}
+
+/** Punto de doblez del cable seleccionado (modo Doblar). */
+export function BendHandle() {
+  const project = useProject((s) => s.project);
+  const selected = useProject((s) => s.selected);
+  const mode = useProject((s) => s.cableMode);
+  const c = project.cables.find((x) => x.id === selected);
+  if (!c || mode !== "bend") return null;
+  const p = cableMid(project, c);
+  return (
+    <group name="bend" position={p}>
+      <mesh geometry={sphere} scale={5}>
+        <meshStandardMaterial color="#ffffff" emissive={C.sel} emissiveIntensity={0.6} />
+      </mesh>
+      <mesh geometry={sphere} scale={11} material={hitMat} userData={{ bendHandle: c.id }} />
     </group>
   );
 }

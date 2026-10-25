@@ -5,6 +5,8 @@ import { bounds, extent, TABLE, type Cable, type Vec3 } from "../core/model/proj
 import { endPos, TERMINALS, termWorld } from "../core/model/terminals";
 import { snap } from "../core/model/units";
 import { useProject, type TermRef } from "../store/project";
+import { shapeOf, type CableShape } from "../core/history/commands";
+import { cableMid } from "./cableCurve";
 import { overlay, sceneApi } from "./api";
 
 // Cámara ortográfica libre y gestos de la mesa:
@@ -26,7 +28,11 @@ type Drag =
   /** Desde un borne: tocar = dejarlo pendiente; arrastrar = cable nuevo. */
   | { kind: "term"; pid: number; sx: number; sy: number; ref: TermRef; moved: boolean; wire: number | null }
   /** Punta de un cable existente. */
-  | { kind: "end"; pid: number; sx: number; sy: number; id: number; i: 0 | 1; before: Cable["ends"]; moved: boolean }
+  | { kind: "end"; pid: number; sx: number; sy: number; id: number; i: 0 | 1; before: CableShape; moved: boolean }
+  /** Cable completo (modo Mover). */
+  | { kind: "cmove"; pid: number; sx: number; sy: number; id: number; before: CableShape; p0: THREE.Vector3; moved: boolean }
+  /** Punto de doblez (modo Doblar), sobre un plano horizontal a la altura h. */
+  | { kind: "bend"; pid: number; sx: number; sy: number; id: number; before: CableShape; h: number; moved: boolean; onHandle: boolean }
   | { kind: "part"; pid: number; sx: number; sy: number; id: number; off: { x: number; y: number }; from: { x: number; y: number }; moved: boolean }
   | { kind: "ext"; id: number };
 
@@ -129,7 +135,7 @@ export function Controller() {
     invalidate();
   };
 
-  type Hit = { kind: "end"; id: number; i: 0 | 1 } | { kind: "term"; ref: TermRef } | { kind: "part"; id: number } | { kind: "cable"; id: number };
+  type Hit = { kind: "end"; id: number; i: 0 | 1 } | { kind: "bend"; id: number } | { kind: "term"; ref: TermRef } | { kind: "part"; id: number } | { kind: "cable"; id: number };
 
   /** Qué hay bajo el dedo. Prioridad: puntas de cable, bornes (si no están tapados), piezas y cables. */
   const hitAny = (cx: number, cy: number): Hit | null => {
@@ -142,6 +148,8 @@ export function Controller() {
     };
     const end = first("ends");
     if (end?.object.userData.cableEnd) return { kind: "end", ...(end.object.userData.cableEnd as { id: number; i: 0 | 1 }) };
+    const bh = first("bend");
+    if (bh?.object.userData.bendHandle !== undefined) return { kind: "bend", id: bh.object.userData.bendHandle as number };
     const term = first("terms"), part = first("parts"), cab = first("cables");
     if (term && (!part || term.distance <= part.distance + 15)) return { kind: "term", ref: term.object.userData.term as TermRef };
     if (part && (!cab || part.distance <= cab.distance)) {
@@ -194,6 +202,28 @@ export function Controller() {
     const d = drag.current, l = last.current;
     if (!d || !l || d.kind === "pan" || d.kind === "orbit") return;
     const st = useProject.getState();
+    if (d.kind === "cmove") {
+      const g = ground(l.x, l.y);
+      if (!g) return;
+      const dx = snap(g.x - d.p0.x), dy = snap(g.y - d.p0.y);
+      const ends = d.before.ends.map((e) => {
+        const [x, y, z] = endPos(st.project, e);
+        return { att: null, x: Math.round(x + dx), y: Math.round(y + dy), z: Math.round(z) };
+      }) as Cable["ends"];
+      const bend = d.before.bend ? ([d.before.bend[0] + dx, d.before.bend[1] + dy, d.before.bend[2]] as Vec3) : null;
+      st.setCableLive(d.id, { ends, bend });
+      return;
+    }
+    if (d.kind === "bend") {
+      const r = rect();
+      const ndc = new THREE.Vector2(((l.x - r.left) / r.width) * 2 - 1, -((l.y - r.top) / r.height) * 2 + 1);
+      ray.current.setFromCamera(ndc, cam);
+      const hit = ray.current.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 0, 1), -d.h), new THREE.Vector3());
+      if (!hit) return;
+      const c = st.project.cables.find((q) => q.id === d.id);
+      if (c) st.setCableLive(d.id, { ends: c.ends, bend: [Math.round(hit.x), Math.round(hit.y), Math.round(d.h)] });
+      return;
+    }
     if (d.kind === "term" || d.kind === "end") {
       const id = d.kind === "term" ? d.wire : d.id;
       if (id === null) return;
@@ -286,9 +316,17 @@ export function Controller() {
       const hit = hitAny(e.clientX, e.clientY);
       const g = ground(e.clientX, e.clientY);
       const base = { pid: e.pointerId, sx: e.clientX, sy: e.clientY, moved: false };
+      const st = P();
+      const selCable = hit?.kind === "cable" && st.selected === hit.id ? st.project.cables.find((q) => q.id === hit.id) : undefined;
       if (hit?.kind === "end") {
-        const c = P().project.cables.find((q) => q.id === hit.id)!;
-        drag.current = { kind: "end", ...base, id: hit.id, i: hit.i, before: c.ends };
+        const c = st.project.cables.find((q) => q.id === hit.id)!;
+        drag.current = { kind: "end", ...base, id: hit.id, i: hit.i, before: shapeOf(c) };
+      } else if (hit?.kind === "bend" || (selCable && st.cableMode === "bend")) {
+        const id = hit!.kind === "bend" || hit!.kind === "cable" ? hit!.id : -1;
+        const c = st.project.cables.find((q) => q.id === id)!;
+        drag.current = { kind: "bend", ...base, id, before: shapeOf(c), h: cableMid(st.project, c)[2], onHandle: hit?.kind === "bend" };
+      } else if (selCable && g) {
+        drag.current = { kind: "cmove", ...base, id: selCable.id, before: shapeOf(selCable), p0: g };
       } else if (hit?.kind === "term") {
         drag.current = { kind: "term", ...base, ref: hit.ref, wire: null };
       } else if (hit?.kind === "part" && g) {
@@ -334,7 +372,7 @@ export function Controller() {
         d.moved = true;
         if (d.kind === "part") P().beginDrag(d.id);
         if (d.kind === "term") d.wire = P().startWire(d.ref);
-        if (d.kind === "end") P().beginEndDrag(d.id);
+        if (d.kind === "end" || d.kind === "cmove" || d.kind === "bend") P().beginEndDrag(d.id);
       }
       if (!d.moved) return;
       if (d.kind === "pan") {
@@ -371,9 +409,16 @@ export function Controller() {
           if (cancel || back) P().dropTemp(d.wire);
           else P().commitTemp(d.wire);
         }
-      } else if (d.kind === "end") {
+      } else if (d.kind === "end" || d.kind === "cmove" || d.kind === "bend") {
         if (d.moved) P().endEndDrag(d.id, d.before);
-        else if (!cancel) P().select(d.id);
+        else if (!cancel && d.kind === "bend" && d.onHandle) {
+          // Doble toque en el punto de doblez: cable recto otra vez.
+          const now = performance.now();
+          if (lastTap.current.id === -d.id && now - lastTap.current.t < 350) {
+            lastTap.current = { id: 0, t: 0 };
+            P().straighten(d.id);
+          } else lastTap.current = { id: -d.id, t: now };
+        } else if (!cancel) P().select(d.id);
       } else if (d.moved) {
         P().endDrag(d.id, d.from);
       } else if (!cancel) {
@@ -477,19 +522,23 @@ export function Controller() {
     }
     applyCamera();
 
-    // Botón ⟳ junto a la pieza seleccionada.
-    const btn = overlay.rotBtn;
-    if (btn) {
-      const st = useProject.getState();
-      const p = st.project.parts.find((q) => q.id === st.selected);
-      if (p && st.dragging === null) {
-        const ez = extent(p)[2];
-        tmp.current.set(p.x, p.y, p.z + ez).project(cam);
-        const x = ((tmp.current.x + 1) / 2) * size.width, y = ((1 - tmp.current.y) / 2) * size.height;
-        btn.style.transform = `translate(${Math.round(x + 18)}px, ${Math.round(y - 62)}px)`;
-        btn.hidden = false;
-      } else btn.hidden = true;
-    }
+    // Botones flotantes junto a la pieza o el cable seleccionado.
+    const st = useProject.getState();
+    const place = (el: HTMLElement | null, at: Vec3 | null, dx: number, dy: number) => {
+      if (!el) return;
+      if (!at || st.dragging !== null) { el.hidden = true; return; }
+      tmp.current.set(at[0], at[1], at[2]).project(cam);
+      const x = ((tmp.current.x + 1) / 2) * size.width, y = ((1 - tmp.current.y) / 2) * size.height;
+      // Quedan dentro de la mesa visible aunque la pieza esté cerca del borde.
+      const w = el.offsetWidth || 100, h = el.offsetHeight || 44;
+      const px = Math.min(size.width - w - 8, Math.max(8, x + dx)), py = Math.min(size.height - h - 8, Math.max(8, y + dy));
+      el.style.transform = `translate(${Math.round(px)}px, ${Math.round(py)}px)`;
+      el.hidden = false;
+    };
+    const sp = st.project.parts.find((q) => q.id === st.selected);
+    place(overlay.partTools, sp ? [sp.x, sp.y, sp.z + extent(sp)[2]] : null, 16, -62);
+    const sc = st.project.cables.find((q) => q.id === st.selected);
+    place(overlay.cableTools, sc ? cableMid(st.project, sc) : null, -(overlay.cableTools?.offsetWidth ?? 160) / 2, -70);
 
     // Indicador de ejes según la cámara.
     const svg = overlay.axes;

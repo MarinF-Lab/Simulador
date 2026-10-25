@@ -1,5 +1,5 @@
 import { lazy, Suspense } from "react";
-import { Box, Info, Maximize, Minus, Plus, RotateCcw, RotateCw } from "lucide-react";
+import { Box, Info, Maximize, Minus, Move, Plus, RotateCcw, RotateCw, Spline, Trash2 } from "lucide-react";
 import { findItem } from "../core/model/catalog";
 import { overlay, sceneApi } from "../scene/api";
 import { useProject } from "../store/project";
@@ -38,7 +38,7 @@ export function Workspace() {
   const selected = useProject((s) => s.selected);
   const count = useProject((s) => s.project.parts.length);
   const type = useProject((s) => s.project.parts.find((p) => p.id === s.selected)?.type);
-  const rotate = useProject((s) => s.rotate);
+  const { rotate, remove, cableMode, setCableMode } = useProject();
   const item = type ? findItem(type) : undefined;
 
   const hint = pending
@@ -48,7 +48,9 @@ export function Workspace() {
     : tab === "simulation"
       ? "Toca Iniciar para simular el circuito y el mecanismo juntos."
       : isCable
-        ? "Arrastra las puntas del cable hasta los bornes. Se pegan solas al acercarlas."
+        ? cableMode === "move"
+          ? "Arrastra el cable para moverlo completo, o arrastra una punta hasta un borne."
+          : "Arrastra el punto blanco para doblar el cable. Tócalo dos veces para dejarlo recto."
       : item
         ? `Arrastra ${item.name.toLowerCase()} para moverlo. Toca dos veces o usa ⟳ para girarlo 90°. Toca un borne para empezar un cable.`
         : "Mueve la mesa con un dedo. Con dos dedos: pellizca para acercar, gira para orbitar y sube o baja para inclinar.";
@@ -59,15 +61,33 @@ export function Workspace() {
         <Scene />
       </Suspense>
 
-      <button
-        ref={(el) => { overlay.rotBtn = el; }}
-        hidden
-        onClick={() => selected !== null && rotate(selected)}
-        aria-label="Girar 90°"
-        className="absolute top-0 left-0 grid size-11 place-items-center rounded-full bg-accent text-accent-ink shadow-lg"
-      >
-        <RotateCw className="size-5" />
-      </button>
+      <div ref={(el) => { overlay.partTools = el; }} hidden className="absolute top-0 left-0 z-10 flex gap-2">
+        <button onClick={() => selected !== null && rotate(selected)} aria-label="Girar 90°" className="grid size-11 place-items-center rounded-full bg-accent text-accent-ink shadow-lg">
+          <RotateCw className="size-5" />
+        </button>
+        <button onClick={() => selected !== null && remove(selected)} aria-label="Eliminar pieza" className="grid size-11 place-items-center rounded-full bg-err text-white shadow-lg">
+          <Trash2 className="size-5" />
+        </button>
+      </div>
+
+      <div ref={(el) => { overlay.cableTools = el; }} hidden className="absolute top-0 left-0 z-10 flex items-center gap-2">
+        <div role="radiogroup" aria-label="Al arrastrar el cable" className="flex rounded-full border border-line bg-panel p-1 shadow-lg">
+          {([["move", "Mover", Move], ["bend", "Doblar", Spline]] as const).map(([m, label, Icon]) => (
+            <button
+              key={m}
+              role="radio"
+              aria-checked={cableMode === m}
+              onClick={() => setCableMode(m)}
+              className={"flex min-h-9 items-center gap-1.5 rounded-full px-3 text-xs font-semibold " + (cableMode === m ? "bg-accent text-accent-ink" : "text-muted")}
+            >
+              <Icon className="size-4" aria-hidden="true" /> {label}
+            </button>
+          ))}
+        </div>
+        <button onClick={() => selected !== null && remove(selected)} aria-label="Eliminar cable" className="grid size-11 place-items-center rounded-full bg-err text-white shadow-lg">
+          <Trash2 className="size-5" />
+        </button>
+      </div>
 
       {running && (
         <span className="pointer-events-none absolute top-14 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full border border-ok/40 bg-panel px-3 py-1 text-xs font-medium text-ok">

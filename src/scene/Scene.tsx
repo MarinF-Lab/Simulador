@@ -5,7 +5,7 @@ import { extent, TABLE, type Part } from "../core/model/project";
 import { useProject } from "../store/project";
 import { Controller } from "./Controller";
 import { PartModel } from "./models";
-import { CableEnds, Cables, FlowTicker, Terminals } from "./Electrical";
+import { BendHandle, CableEnds, Cables, FlowTicker, Terminals } from "./Electrical";
 import { brightness } from "../core/electrical/analyze";
 
 const Q = Math.PI / 2;
@@ -22,7 +22,7 @@ function Grid() {
     return [mk(10, 50), mk(50)];
   }, []);
   return (
-    <group position={[0, 0, 0.05]}>
+    <group position={[0, 0, 0.3]}>
       <lineSegments geometry={minor}>
         <lineBasicMaterial color="#232c4a" />
       </lineSegments>
@@ -36,7 +36,7 @@ function Grid() {
 function Table() {
   return (
     <group>
-      <mesh position={[0, 0, -6]} receiveShadow>
+      <mesh position={[0, 0, -7]} receiveShadow>
         <boxGeometry args={[TABLE.w + 24, TABLE.d + 24, 12]} />
         <meshStandardMaterial color="#121830" roughness={0.9} />
       </mesh>
@@ -80,7 +80,8 @@ function SunLight() {
     const l = ref.current;
     if (!l) return;
     const c = l.shadow.camera;
-    c.left = -800; c.right = 800; c.top = 800; c.bottom = -800; c.near = 100; c.far = 2600;
+    // La esquina más lejana de la mesa queda a unos 970 mm del eje de la luz: el área cubre 1100.
+    c.left = -1100; c.right = 1100; c.top = 1100; c.bottom = -1100; c.near = 100; c.far = 2600;
     c.updateProjectionMatrix();
     l.shadow.mapSize.set(2048, 2048);
     l.shadow.bias = -0.0005;
@@ -117,6 +118,7 @@ export function Scene() {
       <Terminals />
       <Cables />
       <CableEnds />
+      <BendHandle />
       <FlowTicker />
       <Controller />
     </Canvas>

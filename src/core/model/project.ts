@@ -33,6 +33,8 @@ export interface CableEnd {
 export interface Cable {
   id: number;
   ends: [CableEnd, CableEnd];
+  /** Punto por donde pasa el cable doblado (en la mesa, mm). Sin él, el cable hace un arco simple. */
+  bend?: Vec3 | null;
 }
 
 export interface Project {

@@ -28,5 +28,9 @@ export const sceneApi: SceneApi = {
   toScreen: () => ({ x: 0, y: 0 }),
 };
 
-/** Elementos HTML que la escena mueve en cada cuadro (botón ⟳ y ejes). */
-export const overlay: { rotBtn: HTMLElement | null; axes: SVGSVGElement | null } = { rotBtn: null, axes: null };
+/** Elementos HTML que la escena mueve en cada cuadro: botones flotantes y ejes. */
+export const overlay: { partTools: HTMLElement | null; cableTools: HTMLElement | null; axes: SVGSVGElement | null } = {
+  partTools: null,
+  cableTools: null,
+  axes: null,
+};

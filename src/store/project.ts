@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { cableDiff, emptyHistory, exec, record, redo, removeCableCmd, removeCmd, undo, updateCmd, type Command, type History, type Patch } from "../core/history/commands";
+import { cableDiff, emptyHistory, exec, record, redo, removeCableCmd, removeCmd, shapeOf, undo, updateCmd, type CableShape, type Command, type History, type Patch } from "../core/history/commands";
 import { analyze, type Circuit } from "../core/electrical/analyze";
 import { clampZ, findFree, newPart, placeOnTable, type Axis, type Cable, type CableEnd, type Part, type Project, type PropValue, type Vec3 } from "../core/model/project";
 import { detachFrom, endPos, posKey, reattach, termWorld } from "../core/model/terminals";
@@ -47,7 +47,15 @@ interface ProjectState {
   /** Mueve un cable completo en vivo (arrastre desde la biblioteca). */
   moveCableLive: (id: number, x: number, y: number) => void;
   beginEndDrag: (id: number) => void;
-  endEndDrag: (id: number, before: Cable["ends"]) => void;
+  /** Cierra una edición de cable (punta, mover o doblar) y la registra si cambió algo. */
+  endEndDrag: (id: number, before: CableShape) => void;
+  /** Qué hace arrastrar el cuerpo de un cable seleccionado. */
+  cableMode: "move" | "bend";
+  setCableMode: (m: "move" | "bend") => void;
+  /** Cambia la forma de un cable en vivo, sin historial. */
+  setCableLive: (id: number, shape: CableShape) => void;
+  /** Deja el cable recto otra vez. */
+  straighten: (id: number) => void;
   undo: () => void;
   redo: () => void;
 }
@@ -262,12 +270,19 @@ export const useProject = create<ProjectState>((set, get) => {
       const c = cable(id);
       set({ dragging: null });
       if (!c) return;
-      // Si la punta quedó suelta sobre otra punta o un borne, se pega por posición.
-      const ends = c.ends.map((e) => (e.att ? e : { ...e, att: null })) as Cable["ends"];
-      if (JSON.stringify(before) === JSON.stringify(ends)) return;
+      // Las puntas sueltas que quedaron sobre un borne se pegan por posición.
       const cables = reattach(s.project);
       const done = cables.find((x) => x.id === id)!;
-      set({ project: { ...s.project, cables }, history: record(s.history, { kind: "updateCable", id, before, after: done.ends }) });
+      if (JSON.stringify(before) === JSON.stringify(shapeOf(done))) return;
+      set({ project: { ...s.project, cables }, history: record(s.history, { kind: "updateCable", id, before, after: shapeOf(done) }) });
+    },
+    cableMode: "move",
+    setCableMode: (cableMode) => set({ cableMode }),
+    setCableLive: (id, shape) => setCables(get().project.cables.map((c) => (c.id === id ? { ...c, ends: shape.ends, bend: shape.bend ?? null } : c))),
+    straighten: (id) => {
+      const c = cable(id);
+      if (!c?.bend) return;
+      commit({ kind: "updateCable", id, before: shapeOf(c), after: { ends: c.ends, bend: null } });
     },
 
     undo: () => {

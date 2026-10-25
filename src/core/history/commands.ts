@@ -11,9 +11,14 @@ export type Command =
   | { kind: "update"; id: number; before: Patch; after: Patch; mergeKey?: string; t?: number }
   | { kind: "addCable"; cable: Cable }
   | { kind: "removeCable"; cable: Cable; index: number }
-  | { kind: "updateCable"; id: number; before: Cable["ends"]; after: Cable["ends"] }
+  | { kind: "updateCable"; id: number; before: CableShape; after: CableShape }
   /** Varias acciones que se deshacen juntas. */
   | { kind: "batch"; cmds: Command[] };
+
+/** Forma de un cable: sus puntas y su punto de doblez. */
+export type CableShape = Pick<Cable, "ends" | "bend">;
+
+export const shapeOf = (c: Cable): CableShape => ({ ends: c.ends, bend: c.bend ?? null });
 
 export interface History {
   past: Command[];
@@ -52,7 +57,7 @@ export function apply(p: Project, c: Command): Project {
     case "removeCable":
       return { ...p, cables: p.cables.filter((x) => x.id !== c.cable.id) };
     case "updateCable":
-      return { ...p, cables: p.cables.map((x) => (x.id === c.id ? { ...x, ends: c.after } : x)) };
+      return { ...p, cables: p.cables.map((x) => (x.id === c.id ? { ...x, ends: c.after.ends, bend: c.after.bend ?? null } : x)) };
     case "batch":
       return c.cmds.reduce(apply, p);
   }
@@ -125,7 +130,7 @@ export function cableDiff(before: Cable[], after: Cable[]): Command[] {
   const out: Command[] = [];
   for (const a of after) {
     const b = before.find((x) => x.id === a.id);
-    if (b && JSON.stringify(b.ends) !== JSON.stringify(a.ends)) out.push({ kind: "updateCable", id: a.id, before: b.ends, after: a.ends });
+    if (b && JSON.stringify(shapeOf(b)) !== JSON.stringify(shapeOf(a))) out.push({ kind: "updateCable", id: a.id, before: shapeOf(b), after: shapeOf(a) });
   }
   return out;
 }

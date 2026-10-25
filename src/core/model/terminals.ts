@@ -10,7 +10,7 @@ export const TERMINALS: Record<string, [Vec3, Vec3]> = {
   led: [[-7, 0, -11], [7, 0, -11]],
   switch: [[-20, 0, -5], [20, 0, -5]],
   meter: [[-10, -10, -20], [10, -10, -20]],
-  dcmotor: [[-30, -7, 0], [-30, 7, 0]],
+  dcmotor: [[-24, -7, 15], [-24, 7, 15]],
   sensorContact: [[-10, 0, -3], [10, 0, -3]],
 };
 

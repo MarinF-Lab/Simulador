@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef, type ReactNode } from "react";
+import { useLayoutEffect, useMemo, useRef, type ReactNode, type RefObject } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { extent, TABLE, type Part } from "../core/model/project";
@@ -10,6 +10,10 @@ import { brightness } from "../core/electrical/analyze";
 import { ROTORS } from "../core/mechanical/axes";
 import { useUI } from "../store/ui";
 import { Belts } from "./Mechanical";
+import { Joints } from "./Structure";
+import { PhysicsRunner } from "./Physics";
+import { simPoses, useSim } from "../store/sim";
+import { partQuat } from "../physics/world";
 
 const Q = Math.PI / 2;
 
@@ -84,15 +88,50 @@ function Spinner({ id, axis, children }: { id: number; axis: "x" | "z"; children
   return <group ref={ref}>{children}</group>;
 }
 
+const tmpQ = new THREE.Quaternion();
+const tmpV = new THREE.Vector3();
+
+/** Durante la simulación, mueve la pieza según su cuerpo físico (o el motor que la lleva). */
+function useSimPose(ref: RefObject<THREE.Group | null>, part: Part, center: [number, number, number]) {
+  const running = useUI((s) => s.running);
+  const moved = useRef(false);
+  const design = useMemo(() => new THREE.Quaternion(...partQuat(part.rot)), [part.rot]);
+  useFrame(() => {
+    const g = ref.current;
+    if (!g) return;
+    const own = simPoses.map.get(part.id);
+    const f = simPoses.follow.get(part.id);
+    const hold = f && simPoses.map.get(f.holder);
+    if (running && (own || hold)) {
+      if (own) {
+        g.position.set(...own.p);
+        g.quaternion.copy(tmpQ.set(...own.q)).multiply(design);
+      } else if (hold && f) {
+        tmpQ.set(...hold.q);
+        tmpV.set(...f.offset).applyQuaternion(tmpQ);
+        g.position.set(hold.p[0] + tmpV.x, hold.p[1] + tmpV.y, hold.p[2] + tmpV.z);
+        g.quaternion.copy(tmpQ).multiply(design);
+      }
+      moved.current = true;
+    } else if (moved.current) {
+      g.position.set(...center);
+      g.quaternion.copy(design);
+      moved.current = false;
+    }
+  });
+}
+
 function Part3D({ part }: { part: Part }) {
   const ez = extent(part)[2];
+  const ref = useRef<THREE.Group>(null);
+  useSimPose(ref, part, [part.x, part.y, part.z + ez / 2]);
   const reading = useProject((s) => s.circuit.readings[part.id]);
   const glow = part.type === "lamp" || part.type === "led" ? brightness(part.type, part.props, reading) : 0;
   const on = part.type === "sensorContact" ? part.props.pressed === true : part.props.closed !== false;
-  const model = <PartModel type={part.type} glow={glow} burned={part.props.burned === true} on={on} />;
+  const model = <PartModel type={part.type} props={part.props} glow={glow} burned={part.props.burned === true} on={on} />;
   const rotor = ROTORS[part.type];
   return (
-    <group position={[part.x, part.y, part.z + ez / 2]} rotation={[part.rot[0] * Q, part.rot[1] * Q, part.rot[2] * Q]} userData={{ partId: part.id }}>
+    <group ref={ref} position={[part.x, part.y, part.z + ez / 2]} rotation={[part.rot[0] * Q, part.rot[1] * Q, part.rot[2] * Q]} userData={{ partId: part.id }}>
       {rotor ? <Spinner id={part.id} axis={rotor.local}>{model}</Spinner> : model}
     </group>
   );
@@ -122,7 +161,10 @@ export function Scene() {
   const sel = parts.find((p) => p.id === selected);
   const eflag = useProject((s) => s.circuit.flag);
   const mflag = useProject((s) => s.mech.flag);
-  const flag = useMemo(() => ({ ...mflag, ...eflag }), [eflag, mflag]);
+  const sflag = useProject((s) => s.structure.flag);
+  const simFlag = useSim((s) => s.status?.flag);
+  const running = useUI((s) => s.running);
+  const flag = useMemo(() => ({ ...sflag, ...mflag, ...eflag, ...(simFlag ?? {}) }), [eflag, mflag, sflag, simFlag]);
   return (
     <Canvas
       shadows
@@ -140,13 +182,16 @@ export function Scene() {
       <group name="parts">
         {parts.map((p) => <Part3D key={p.id} part={p} />)}
       </group>
-      {parts.filter((p) => flag[p.id] && p.id !== selected).map((p) => <OutlineBox key={p.id} part={p} kind={flag[p.id]!} pad={4} />)}
-      {sel && <OutlineBox part={sel} kind="sel" />}
-      <Terminals />
+      {/* Al simular, las piezas se mueven: los marcos, bornes y juntas de diseño se ocultan. */}
+      {!running && parts.filter((p) => flag[p.id] && p.id !== selected).map((p) => <OutlineBox key={p.id} part={p} kind={flag[p.id]!} pad={4} />)}
+      {!running && sel && <OutlineBox part={sel} kind="sel" />}
+      {!running && <Terminals />}
       <Cables />
       <CableEnds />
       <BendHandle />
       <Belts />
+      {!running && <Joints />}
+      {running && <PhysicsRunner />}
       <FlowTicker />
       <Controller />
     </Canvas>

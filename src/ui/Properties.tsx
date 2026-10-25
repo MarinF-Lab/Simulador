@@ -1,16 +1,17 @@
 import { useEffect, useState } from "react";
-import { ArrowLeftRight, ChevronDown, ChevronUp, RotateCw, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronUp, RotateCw, Trash2 } from "lucide-react";
 import { brightness, ELEC_DEFAULTS } from "../core/electrical/analyze";
 import type { Issue } from "../core/electrical/circuit";
 import { findItem } from "../core/model/catalog";
-import { endPos, POLAR, posKey } from "../core/model/terminals";
+import { endPos, posKey } from "../core/model/terminals";
 import { fmt, fmtA, fmtV, parseDecimal } from "../core/model/units";
-import { extent, type Axis, type PropValue } from "../core/model/project";
+import { extent, RESIZABLE, sizeOf, type Axis, type PropValue } from "../core/model/project";
 import { useProject } from "../store/project";
 import { useUI } from "../store/ui";
 import { PartIcon } from "./PartIcon";
 import { sectionsFor, type Field } from "./propertySchema";
 import { useIssues } from "./useIssues";
+import { useSim } from "../store/sim";
 import { isRotor } from "../core/mechanical/axes";
 
 const inputCls =
@@ -159,6 +160,36 @@ function FieldRow({ partId, field }: { partId: number; field: Field }) {
 
 const sq = "grid size-10 place-items-center rounded-lg border border-line hover:border-accent/60 disabled:opacity-40";
 
+/** Largo y ancho de una estructura, con − / + de 10 en 10 mm y casilla para escribir. */
+function SizeEditor({ id }: { id: number }) {
+  const part = useProject((s) => s.project.parts.find((p) => p.id === id));
+  const setSize = useProject((s) => s.setSize);
+  if (!part) return null;
+  const spec = RESIZABLE[part.type];
+  if (!spec) return null;
+  const [lx, ly] = sizeOf(part.type, part.props);
+  const row = (key: "lx" | "ly", label: string, value: number, range: [number, number]) => (
+    <div key={key} className="flex min-h-11 items-center justify-between gap-3 text-sm">
+      <label htmlFor={`size-${id}-${key}`}>{label} <span className="text-muted">(mm)</span></label>
+      <span className="flex items-center gap-2">
+        <button className={sq} onClick={() => setSize(id, key, value - 10)} disabled={value <= range[0]} aria-label={`${label}: 10 mm menos`}>−</button>
+        <NumberInput id={`size-${id}-${key}`} label={`${label} en mm`} value={value} min={range[0]} max={range[1]} onChange={(v) => setSize(id, key, v)} />
+        <button className={sq} onClick={() => setSize(id, key, value + 10)} disabled={value >= range[1]} aria-label={`${label}: 10 mm más`}>+</button>
+      </span>
+    </div>
+  );
+  return (
+    <section className="rounded-xl border border-line px-3 py-2">
+      <h3 className="pb-1 text-xs font-semibold tracking-widest text-muted uppercase">Tamaño</h3>
+      <div className="flex flex-col divide-y divide-line/60">
+        {spec.lx && row("lx", "Largo", lx, spec.lx)}
+        {spec.ly && row("ly", "Ancho", ly, spec.ly)}
+      </div>
+      <p className="pb-1 text-xs text-muted">Los agujeros van cada 10 mm y se ajustan solos al cambiar el tamaño.</p>
+    </section>
+  );
+}
+
 function Placement({ id }: { id: number }) {
   const part = useProject((s) => s.project.parts.find((p) => p.id === id));
   const { setZ, rotate, rotAxis, setRotAxis } = useProject();
@@ -303,14 +334,18 @@ function Motion({ id }: { id: number }) {
 }
 
 function MotorSpeed({ id }: { id: number }) {
-  const w = useProject((s) => s.mech.rpm[id] ?? 0);
+  const design = useProject((s) => s.mech.rpm[id] ?? 0);
+  const live = useSim((s) => s.status?.motors[id]);
+  const w = live?.rpm ?? design;
   return (
     <section className="rounded-xl border border-line px-3 py-2">
-      <h3 className="pb-2 text-xs font-semibold tracking-widest text-muted uppercase">Giro del eje</h3>
+      <h3 className="pb-2 text-xs font-semibold tracking-widest text-muted uppercase">Giro del eje{live ? " (simulación)" : ""}</h3>
       <div className="grid grid-cols-3 gap-2 pb-1">
         <Cell k="Velocidad" v={fmtRpm(w)} big />
         <Cell k="Sentido" v={turn(w)} />
+        {live ? <Cell k="Par" v={`${fmt(live.torque)} N·m`} /> : <Cell k="Carga" v="en vacío" />}
       </div>
+      {live && <p className="pb-1 text-xs text-muted">Corriente con carga: {fmtA(live.current)}. Al frenar el motor, sube la corriente.</p>}
     </section>
   );
 }
@@ -345,6 +380,36 @@ function BeltPanel({ id }: { id: number }) {
       <button onClick={() => toggleCross(id)} className="min-h-11 rounded-lg border border-line px-3 text-sm font-medium hover:border-accent/60">
         {belt.cross ? "Cambiar a correa normal" : "Cambiar a correa cruzada"}
       </button>
+      <ComponentStatus id={id} />
+    </>
+  );
+}
+
+function JointPanel({ id }: { id: number }) {
+  const joint = useProject((s) => (s.project.joints ?? []).find((j) => j.id === id));
+  const parts = useProject((s) => s.project.parts);
+  const { remove, setJointKind } = useProject();
+  if (!joint) return null;
+  const nm = (pid: number) => { const p = parts.find((x) => x.id === pid); const it = p && findItem(p.type); return it ? `${it.name}${it.variant ? ` ${it.variant}` : ""}` : "—"; };
+  return (
+    <>
+      <div className="flex items-center gap-3 rounded-xl border border-line bg-panel-2/60 p-3">
+        <PartIcon kind={joint.kind === "revolute" ? "joint" : "bolt"} className="size-10 text-ink/85" />
+        <div className="min-w-0 flex-1">
+          <p className="font-semibold">{joint.kind === "revolute" ? "Junta rotacional" : "Unión fija"}</p>
+          <p className="text-xs text-muted">Une {nm(joint.a.part).toLowerCase()} con {nm(joint.b.part).toLowerCase()}</p>
+        </div>
+        <button onClick={() => remove(id)} aria-label="Eliminar junta" className="grid size-11 place-items-center rounded-lg text-muted hover:bg-panel hover:text-err">
+          <Trash2 className="size-5" />
+        </button>
+      </div>
+      <div className="flex gap-2">
+        {(["revolute", "fixed"] as const).map((k) => (
+          <button key={k} onClick={() => setJointKind(id, k)} aria-pressed={joint.kind === k} className={"min-h-11 flex-1 rounded-lg border px-3 text-sm font-medium " + (joint.kind === k ? "border-accent bg-accent text-accent-ink" : "border-line")}>
+            {k === "revolute" ? "Rotacional (gira)" : "Fija (perno)"}
+          </button>
+        ))}
+      </div>
       <ComponentStatus id={id} />
     </>
   );
@@ -390,12 +455,14 @@ export function Properties() {
   const part = useProject((s) => s.project.parts.find((p) => p.id === s.selected));
   const isCable = useProject((s) => s.project.cables.some((c) => c.id === s.selected));
   const isBelt = useProject((s) => (s.project.belts ?? []).some((b) => b.id === s.selected));
-  const { remove, replace, flip, actuate } = useProject();
+  const isJoint = useProject((s) => (s.project.joints ?? []).some((j) => j.id === s.selected));
+  const { remove, replace, actuate } = useProject();
   const item = part ? findItem(part.type) : undefined;
 
   const body = (() => {
     if (isCable && selected !== null) return <CablePanel id={selected} />;
     if (isBelt && selected !== null) return <BeltPanel id={selected} />;
+    if (isJoint && selected !== null) return <JointPanel id={selected} />;
     if (!part || !item) {
       return <p className="px-1 text-sm text-muted">Toca una pieza o un cable de la mesa para ver sus lecturas y cambiar sus propiedades. Para unir dos bornes, tócalos uno después del otro.</p>;
     }
@@ -426,7 +493,7 @@ export function Properties() {
         {part.type === "dcmotor" && <MotorSpeed id={part.id} />}
         {isRotor(part.type) && <Motion id={part.id} />}
 
-        {(part.type === "switch" || part.type === "sensorContact" || POLAR.has(part.type)) && (
+        {(part.type === "switch" || part.type === "sensorContact") && (
           <div className="flex flex-wrap gap-2">
             {part.type === "switch" && (
               <button onClick={() => actuate(part.id)} className="min-h-11 flex-1 rounded-lg bg-accent px-3 text-sm font-semibold text-accent-ink">
@@ -436,11 +503,6 @@ export function Properties() {
             {part.type === "sensorContact" && (
               <button onClick={() => actuate(part.id)} className="min-h-11 flex-1 rounded-lg bg-accent px-3 text-sm font-semibold text-accent-ink">
                 {part.props.pressed === true ? "Soltar sensor" : "Presionar sensor"}
-              </button>
-            )}
-            {POLAR.has(part.type) && (
-              <button onClick={() => flip(part.id)} className="flex min-h-11 flex-1 items-center justify-center gap-2 rounded-lg border border-line px-3 text-sm font-medium hover:border-accent/60">
-                <ArrowLeftRight className="size-4" aria-hidden="true" /> Invertir polaridad
               </button>
             )}
           </div>
@@ -455,6 +517,7 @@ export function Properties() {
           </section>
         ))}
 
+        <SizeEditor id={part.id} />
         <Placement id={part.id} />
         <ComponentStatus id={part.id} />
       </>

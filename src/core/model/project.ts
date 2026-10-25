@@ -45,10 +45,19 @@ export interface Belt {
   cross: boolean;
 }
 
+/** Junta entre dos agujeros alineados: rotacional (gira) o fija (perno). */
+export interface Joint {
+  id: number;
+  kind: "revolute" | "fixed";
+  a: { part: number; h: number };
+  b: { part: number; h: number };
+}
+
 export interface Project {
   parts: Part[];
   cables: Cable[];
   belts?: Belt[];
+  joints?: Joint[];
   /** Contador compartido: piezas y cables nunca repiten id. */
   nextId: number;
 }
@@ -69,7 +78,23 @@ export const SIZES: Record<string, Vec3> = {
   sensorAngle: [20, 20, 14], sensorContact: [20, 20, 14], meter: [40, 20, 50], text: [60, 4, 30],
 };
 
-export const sizeOf = (type: string): Vec3 => SIZES[type] ?? [40, 40, 20];
+/** Piezas con tamaño editable: largo (lx) y ancho (ly) en mm, de 10 en 10. */
+export const RESIZABLE: Record<string, { lx?: [number, number]; ly?: [number, number] }> = {
+  profile60: { lx: [20, 600] }, profile120: { lx: [20, 600] }, profile240: { lx: [20, 600] },
+  plate: { lx: [40, 600], ly: [40, 400] },
+  link: { lx: [40, 300] },
+  shaft: { lx: [20, 300] },
+};
+
+const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
+
+/** Tamaño de la pieza sin girar. Si la pieza tiene largo o ancho propio (props lx, ly), lo usa. */
+export function sizeOf(type: string, props?: Record<string, unknown>): Vec3 {
+  const base = SIZES[type] ?? [40, 40, 20];
+  const r = RESIZABLE[type];
+  if (!r || !props) return base;
+  return [r.lx ? (num(props.lx) ?? base[0]) : base[0], r.ly ? (num(props.ly) ?? base[1]) : base[1], base[2]];
+}
 
 /** Gira un vector un cuarto de vuelta (sentido antihorario) sobre un eje. */
 function quarter(v: Vec3, axis: Axis): Vec3 {
@@ -88,8 +113,8 @@ export function rotateLocal(v: Vec3, rot: Vec3): Vec3 {
 }
 
 /** Tamaño de la caja que ocupa la pieza ya girada. */
-export function extent(part: Pick<Part, "type" | "rot">): Vec3 {
-  const [sx, sy, sz] = sizeOf(part.type);
+export function extent(part: Pick<Part, "type" | "rot"> & { props?: Part["props"] }): Vec3 {
+  const [sx, sy, sz] = sizeOf(part.type, part.props);
   const ax = rotateLocal([sx, 0, 0], part.rot), ay = rotateLocal([0, sy, 0], part.rot), az = rotateLocal([0, 0, sz], part.rot);
   const sum = (k: number) => Math.abs(ax[k]!) + Math.abs(ay[k]!) + Math.abs(az[k]!);
   return [sum(0), sum(1), sum(2)];

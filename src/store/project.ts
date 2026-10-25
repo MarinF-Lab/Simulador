@@ -1,11 +1,23 @@
 import { create } from "zustand";
 import { cableDiff, emptyHistory, exec, record, redo, removeCableCmd, removeCmd, shapeOf, undo, updateCmd, type CableShape, type Command, type History, type Patch } from "../core/history/commands";
 import { analyze, type Circuit } from "../core/electrical/analyze";
-import { clampZ, findFree, newPart, placeOnTable, type Axis, type Cable, type CableEnd, type Part, type Project, type PropValue, type Vec3 } from "../core/model/project";
+import { clampZ, findFree, newPart, placeOnTable, RESIZABLE, type Axis, type Cable, type CableEnd, type Part, type Project, type PropValue, type Vec3 } from "../core/model/project";
 import { detachFrom, endPos, posKey, reattach, termWorld } from "../core/model/terminals";
 import { snapRotor } from "../core/mechanical/snap";
 import { isRotor } from "../core/mechanical/axes";
 import { solveTrain, type Train } from "../core/mechanical/train";
+import { alignedPairs, restHeight, snapHoles, type HoleRef } from "../core/model/holes";
+import { checkStructure, type StructureCheck } from "../core/model/structure";
+import type { Joint } from "../core/model/project";
+
+/** Junta que se ofrece al soltar una pieza con un agujero alineado. */
+export interface JointOffer {
+  a: HoleRef;
+  b: HoleRef;
+  p: Vec3;
+  /** Uno de los agujeros es la punta del eje de un motor. */
+  shaft: boolean;
+}
 
 /** RPM de cada motor según el voltaje que recibe: RPM nominal × V / V nominal. */
 export function motorSpeeds(project: Project, circuit: Circuit): Record<number, number> {
@@ -37,6 +49,15 @@ interface ProjectState {
   pending: TermRef | null;
   circuit: Circuit;
   mech: Train;
+  structure: StructureCheck;
+  jointOffer: JointOffer | null;
+  /** Poniendo una unión o una junta desde la biblioteca. */
+  jointTool: Joint["kind"] | null;
+  acceptJoint: (kind: Joint["kind"]) => void;
+  dismissJoint: () => void;
+  /** Toque en una pieza con la herramienta Unión o Junta rotacional. */
+  jointTap: (id: number, at: Vec3) => void;
+  setJointKind: (id: number, kind: Joint["kind"]) => void;
   /** Poniendo una correa: null = no; first = primera polea tocada. */
   beltMode: { first: number | null } | null;
   /** Posición de la pieza al empezar a arrastrarla (para deshacer). */
@@ -61,6 +82,8 @@ interface ProjectState {
   replace: (id: number) => void;
   /** Accionar: abre o cierra un interruptor, presiona o suelta un sensor de contacto. */
   actuate: (id: number) => void;
+  /** Cambia el largo (lx) o el ancho (ly) de una estructura, de 10 en 10 mm. */
+  setSize: (id: number, key: "lx" | "ly", mm: number) => void;
   remove: (id: number) => void;
   /** Toque en un borne: el primero queda pendiente, el segundo crea el cable. */
   tapTerminal: (t: TermRef) => void;
@@ -100,17 +123,27 @@ function sample(): Project {
   const sw = P(2, "switch", -90, 130);
   const res = P(3, "resistor", 30, 130, 0, { r: 100 });
   const lamp = P(4, "lamp", 60, 10, 0, { vn: 6 });
-  // Tren 10 → 40 con correa, movido por un motor de 12 V (como el ejemplo del prototipo).
-  const bat2 = P(13, "source", 120, 150, 0, { v: 12 });
-  const motor: Part = { id: 14, type: "dcmotor", x: 140, y: 60, z: 30, rot: [0, 0, 0], props: { rpm: 120 } };
-  const g10: Part = { id: 15, type: "gear10", x: 165, y: 60, z: 33, rot: [0, 1, 0], props: {} };
-  const g40: Part = { id: 16, type: "gear40", x: 165, y: 110, z: 3, rot: [0, 1, 0], props: {} };
-  const pS: Part = { id: 17, type: "pulleyS", x: 175, y: 110, z: 35, rot: [0, 1, 0], props: {} };
-  const pL: Part = { id: 18, type: "pulleyL", x: 175, y: 220, z: 17, rot: [0, 1, 0], props: {} };
-  const parts = [bat, sw, res, lamp, P(8, "profile240", -60, -80), bat2, motor, g10, g40, pS, pL];
+  // Motor de pie sobre una placa: en su eje, un engranaje de 10 que mueve uno de 40 y un brazo
+  // de dos tramos (eslabón y perfil) unidos por juntas rotacionales.
+  const plate = P(13, "plate", 200, -40, 0, { lx: 200, ly: 160 });
+  const motor: Part = { id: 14, type: "dcmotor", x: 180, y: -40, z: 6, rot: [0, 3, 0], props: { rpm: 30, torque: 0.8, vnom: 12 } };
+  const g10: Part = { id: 15, type: "gear10", x: 180, y: -40, z: 57, rot: [0, 0, 0], props: {} };
+  const axle: Part = { id: 16, type: "shaft", x: 230, y: -40, z: 6, rot: [0, 3, 0], props: { lx: 60 } };
+  const g40: Part = { id: 17, type: "gear40", x: 230, y: -40, z: 57, rot: [0, 0, 0], props: {} };
+  const link: Part = { id: 18, type: "link", x: 203, y: -40, z: 66, rot: [0, 0, 0], props: { lx: 60 } };
+  const arm: Part = { id: 19, type: "profile60", x: 251, y: -40, z: 72, rot: [0, 0, 0], props: {} };
+  const bat2 = P(20, "source", 70, -120, 0, { v: 12 });
+  const parts = [bat, sw, res, lamp, P(8, "profile240", -60, -80), plate, motor, g10, axle, g40, link, arm, bat2];
   const cables = [wire(9, bat, 1, sw, 0), wire(10, sw, 1, res, 0), wire(11, res, 1, lamp, 1), wire(12, lamp, 0, bat, 0),
-    wire(19, bat2, 1, motor, 1), wire(20, motor, 0, bat2, 0)];
-  return { parts, cables, belts: [{ id: 21, a: 17, b: 18, cross: false }], nextId: 22 };
+    wire(21, bat2, 1, motor, 1), wire(22, motor, 0, bat2, 0)];
+  const base: Project = { parts, cables, belts: [], nextId: 23 };
+  // Juntas: el eslabón en el eje del motor y el perfil sobre el otro extremo del eslabón.
+  const onShaft = alignedPairs(base, 18).find((q) => q.shaft);
+  const elbow = alignedPairs(base, 19).find((q) => q.b.part === 18);
+  const joints: Joint[] = [];
+  if (onShaft) joints.push({ id: 23, kind: "revolute", a: onShaft.a, b: onShaft.b });
+  if (elbow) joints.push({ id: 24, kind: "revolute", a: elbow.a, b: elbow.b });
+  return { ...base, joints, nextId: 25 };
 }
 
 export const useProject = create<ProjectState>((set, get) => {
@@ -124,6 +157,15 @@ export const useProject = create<ProjectState>((set, get) => {
   const cable = (id: number) => get().project.cables.find((c) => c.id === id);
   const setCables = (cables: Cable[]) => set({ project: { ...get().project, cables } });
   const initial = sample();
+  /** Tras soltar una pieza: si quedó un agujero alineado sin junta, se ofrece una. */
+  const offerJoint = (id: number) => {
+    const s = get();
+    const taken = new Set((s.project.joints ?? []).flatMap((j) => [`${j.a.part}:${j.a.h}`, `${j.b.part}:${j.b.h}`]));
+    const pairs = alignedPairs(s.project, id).filter((q) => !taken.has(`${q.a.part}:${q.a.h}`) && !taken.has(`${q.b.part}:${q.b.h}`));
+    if (!pairs.length) { set({ jointOffer: null }); return; }
+    const best = pairs.find((q) => q.shaft) ?? pairs[0]!;
+    set({ jointOffer: best });
+  };
   const initialCircuit = analyze(initial);
 
   return {
@@ -137,6 +179,34 @@ export const useProject = create<ProjectState>((set, get) => {
     mech: solveTrain(initial, motorSpeeds(initial, initialCircuit)),
     beltMode: null,
     dragFrom: null,
+    structure: checkStructure(initial),
+    jointOffer: null,
+    jointTool: null,
+    acceptJoint: (kind) => {
+      const o = get().jointOffer;
+      if (!o) return;
+      const id = get().project.nextId;
+      commit({ kind: "addJoint", joint: { id, kind, a: o.a, b: o.b } });
+      set({ jointOffer: null, selected: id });
+    },
+    dismissJoint: () => set({ jointOffer: null }),
+    jointTap: (id, at) => {
+      const s = get();
+      const kind = s.jointTool;
+      if (!kind) return;
+      const taken = new Set((s.project.joints ?? []).flatMap((j) => [`${j.a.part}:${j.a.h}`, `${j.b.part}:${j.b.h}`]));
+      const pairs = alignedPairs(s.project, id).filter((q) => !taken.has(`${q.a.part}:${q.a.h}`) && !taken.has(`${q.b.part}:${q.b.h}`));
+      if (!pairs.length) { set({ selected: id }); return; }
+      const d = (p: Vec3) => Math.hypot(p[0] - at[0], p[1] - at[1], p[2] - at[2]);
+      const best = pairs.reduce((m, q) => (d(q.p) < d(m.p) ? q : m));
+      const jid = s.project.nextId;
+      commit({ kind: "addJoint", joint: { id: jid, kind, a: best.a, b: best.b } });
+      set({ jointTool: null, selected: jid });
+    },
+    setJointKind: (id, kind) => {
+      const j = (get().project.joints ?? []).find((x) => x.id === id);
+      if (j && j.kind !== kind) commit({ kind: "updateJoint", id, before: j.kind, after: kind });
+    },
     beltTap: (id) => {
       const s = get();
       const bm = s.beltMode;
@@ -154,14 +224,18 @@ export const useProject = create<ProjectState>((set, get) => {
       const b = (get().project.belts ?? []).find((x) => x.id === id);
       if (b) commit({ kind: "updateBelt", id, before: b.cross, after: !b.cross });
     },
-    select: (selected) => set({ selected, pending: null, beltMode: null }),
+    select: (selected) => set({ selected, pending: null, beltMode: null, jointTool: null, jointOffer: null }),
     setRotAxis: (rotAxis) => set({ rotAxis }),
     run: commit,
 
     addNear: (type, x, y) => {
       const s = get();
       if (type === "belt") {
-        set({ beltMode: { first: null }, selected: null, pending: null });
+        set({ beltMode: { first: null }, selected: null, pending: null, jointTool: null });
+        return -1;
+      }
+      if (type === "bolt" || type === "joint") {
+        set({ jointTool: type === "bolt" ? "fixed" : "revolute", beltMode: null, selected: null, pending: null });
         return -1;
       }
       if (type === "wire") {
@@ -196,6 +270,7 @@ export const useProject = create<ProjectState>((set, get) => {
       if (p) {
         const project = { ...s.project, cables: reattach(s.project) };
         set({ project, history: record(s.history, { kind: "add", part: p }), dragging: null, dragFrom: null });
+        offerJoint(id);
         return;
       }
       const c = cable(id);
@@ -218,8 +293,20 @@ export const useProject = create<ProjectState>((set, get) => {
       if (!p) return;
       // Engranajes y poleas: imán al eje de un motor, a otro eje o a la distancia de engrane.
       const o = s.dragFrom ?? p;
-      const snapped = isRotor(p.type) ? snapRotor(s.project, { ...p, rot: o.rot, z: o.z }, x, y) : null;
-      const next = snapped ?? { ...placeOnTable({ ...p, rot: o.rot }, x, y), z: o.z, rot: o.rot };
+      let next: Pick<Part, "x" | "y" | "z" | "rot">;
+      if (isRotor(p.type)) {
+        const snapped = snapRotor(s.project, { ...p, rot: o.rot, z: o.z }, x, y);
+        next = snapped ?? { ...placeOnTable({ ...p, rot: o.rot }, x, y), z: o.z, rot: o.rot };
+      } else {
+        // Imán de agujeros primero; si no, la pieza se apoya sobre lo que tenga debajo (o la mesa).
+        const base = { ...p, rot: o.rot };
+        const h = snapHoles(s.project, base, x, y);
+        if (h) next = { ...h, rot: o.rot };
+        else {
+          const at = placeOnTable(base, x, y);
+          next = { ...at, z: restHeight(s.project, base, at.x, at.y), rot: o.rot };
+        }
+      }
       if (next.x === p.x && next.y === p.y && next.z === p.z && next.rot.join() === p.rot.join()) return;
       set({ project: { ...s.project, parts: s.project.parts.map((q) => (q.id === id ? { ...q, ...next } : q)) } });
     },
@@ -238,6 +325,7 @@ export const useProject = create<ProjectState>((set, get) => {
       const move: Command = { kind: "update", id, before: { x: from.x, y: from.y, z: from.z, rot: from.rot }, after: { x: p.x, y: p.y, z: p.z, rot: p.rot } };
       const extra = cableDiff(s.project.cables, cables);
       set({ project: { ...s.project, cables }, history: record(s.history, extra.length ? { kind: "batch", cmds: [move, ...extra] } : move) });
+      offerJoint(id);
     },
     rotate: (id, axis) => {
       const p = part(id);
@@ -265,6 +353,15 @@ export const useProject = create<ProjectState>((set, get) => {
     setZ: (id, z) => commit(updateCmd(get().project, id, { z: clampZ(z) }, `${id}:z`)),
     setProp: (id, key, v) => commit(updateCmd(get().project, id, { props: { [key]: v } } as Patch, `${id}:${key}`)),
     replace: (id) => commit(updateCmd(get().project, id, { props: { burned: undefined, burnV: undefined } })),
+    setSize: (id, key, mm) => {
+      const p = part(id);
+      const range = p && RESIZABLE[p.type]?.[key];
+      if (!p || !range) return;
+      const v = Math.min(range[1], Math.max(range[0], Math.round(mm / 10) * 10));
+      const next = { ...p, props: { ...p.props, [key]: v } };
+      const at = placeOnTable(next, p.x, p.y);
+      commit(updateCmd(get().project, id, { props: { [key]: v }, ...at }, `${id}:${key}`));
+    },
     actuate: (id) => {
       const p = part(id);
       if (!p) return;
@@ -275,14 +372,20 @@ export const useProject = create<ProjectState>((set, get) => {
       const s = get();
       const belts = s.project.belts ?? [];
       const bi = belts.findIndex((b) => b.id === id);
-      if (bi >= 0) commit({ kind: "removeBelt", belt: belts[bi]!, index: bi });
+      const joints = s.project.joints ?? [];
+      const ji = joints.findIndex((j) => j.id === id);
+      if (ji >= 0) commit({ kind: "removeJoint", joint: joints[ji]!, index: ji });
+      else if (bi >= 0) commit({ kind: "removeBelt", belt: belts[bi]!, index: bi });
       else if (isCable(s.project, id)) commit(removeCableCmd(s.project, id));
       else {
         const rm = removeCmd(s.project, id);
         if (!rm) return;
         const detach = cableDiff(s.project.cables, detachFrom(s.project, id));
-        // Las correas de una polea borrada se van con ella.
-        const gone: Command[] = belts.flatMap((b, index) => (b.a === id || b.b === id ? [{ kind: "removeBelt", belt: b, index } as Command] : []));
+        // Las correas de una polea borrada y las juntas de la pieza se van con ella.
+        const gone: Command[] = [
+          ...belts.flatMap((b, index) => (b.a === id || b.b === id ? [{ kind: "removeBelt", belt: b, index } as Command] : [])),
+          ...(s.project.joints ?? []).flatMap((j, index) => (j.a.part === id || j.b.part === id ? [{ kind: "removeJoint", joint: j, index } as Command] : [])),
+        ];
         const all = [...detach, ...gone.reverse(), rm];
         commit(all.length > 1 ? { kind: "batch", cmds: all } : rm);
       }
@@ -365,14 +468,14 @@ export const useProject = create<ProjectState>((set, get) => {
     undo: () => {
       const s = get();
       const [project, history] = undo(s.project, s.history);
-      const alive = (id: number | null) => id !== null && (project.parts.some((p) => p.id === id) || project.cables.some((c) => c.id === id) || (project.belts ?? []).some((b) => b.id === id));
-      set({ project, history, selected: alive(s.selected) ? s.selected : null, pending: null });
+      const alive = (id: number | null) => id !== null && (project.parts.some((p) => p.id === id) || project.cables.some((c) => c.id === id) || (project.belts ?? []).some((b) => b.id === id) || (project.joints ?? []).some((j) => j.id === id));
+      set({ project, history, selected: alive(s.selected) ? s.selected : null, pending: null, jointOffer: null });
     },
     redo: () => {
       const s = get();
       const [project, history] = redo(s.project, s.history);
-      const alive = (id: number | null) => id !== null && (project.parts.some((p) => p.id === id) || project.cables.some((c) => c.id === id) || (project.belts ?? []).some((b) => b.id === id));
-      set({ project, history, selected: alive(s.selected) ? s.selected : null, pending: null });
+      const alive = (id: number | null) => id !== null && (project.parts.some((p) => p.id === id) || project.cables.some((c) => c.id === id) || (project.belts ?? []).some((b) => b.id === id) || (project.joints ?? []).some((j) => j.id === id));
+      set({ project, history, selected: alive(s.selected) ? s.selected : null, pending: null, jointOffer: null });
     },
   };
 });
@@ -392,7 +495,7 @@ useProject.subscribe((s, prev) => {
     });
     return;
   }
-  useProject.setState({ circuit: c, mech: solveTrain(s.project, motorSpeeds(s.project, c)) });
+  useProject.setState({ circuit: c, mech: solveTrain(s.project, motorSpeeds(s.project, c)), structure: checkStructure(s.project) });
 });
 
 /** Posición actual de una punta de cable. */

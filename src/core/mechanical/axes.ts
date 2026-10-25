@@ -1,6 +1,6 @@
 // Ejes de giro de las piezas mecánicas y de los motores, en coordenadas de la mesa.
 
-import { extent, rotateLocal, type Part, type Vec3 } from "../model/project";
+import { extent, rotateLocal, sizeOf, type Part, type Vec3 } from "../model/project";
 
 export type V = Vec3;
 export const add = (a: V, b: V): V => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
@@ -49,7 +49,9 @@ export function rotorAxis(p: Part): Axis | null {
   const spec = ROTORS[p.type];
   if (!spec) return null;
   const a = rotateLocal(spec.local === "z" ? [0, 0, 1] : [1, 0, 0], p.rot);
-  return { id: p.id, c: centerOf(p), a, t: spec.t, r: spec.r };
+  // El eje tiene largo editable.
+  const t = p.type === "shaft" ? sizeOf(p.type, p.props)[0] : spec.t;
+  return { id: p.id, c: centerOf(p), a, t, r: spec.r };
 }
 
 export function motorAxis(p: Part): Axis | null {

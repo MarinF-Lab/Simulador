@@ -122,7 +122,16 @@ function Holes({ len, rows = [0], z, every = 10 }: { len: number; rows?: number[
   return <mesh geometry={geo} material={M.hole} />;
 }
 
-const PLATE_ROWS = [-40, -20, 0, 20, 40];
+const rowCache = new Map<number, number[]>();
+/** Filas de agujeros de una placa: cada 20 mm, a 10 mm del borde. Se guarda para no rehacer la figura. */
+function plateRows(w: number): number[] {
+  const hit = rowCache.get(w);
+  if (hit) return hit;
+  const rows: number[] = [];
+  for (let y = -w / 2 + 10; y <= w / 2 - 10 + 0.1; y += 20) rows.push(y);
+  rowCache.set(w, rows);
+  return rows;
+}
 
 function Wire() {
   const geo = useMemo(() => {
@@ -173,7 +182,7 @@ export interface ModelState {
   on?: boolean;
 }
 
-function Model({ type, glow = 0, burned = false, on = true }: { type: string } & ModelState) {
+function Model({ type, glow = 0, burned = false, on = true, size }: { type: string; size: [number, number, number] } & ModelState) {
   switch (type) {
     case "source":
       return (
@@ -276,7 +285,7 @@ function Model({ type, glow = 0, burned = false, on = true }: { type: string } &
         </group>
       );
     case "shaft":
-      return <Cyl r={4} h={120} p={[0, 0, 4]} axis="x" m={M.steel} />;
+      return <Cyl r={4} h={size[0]} p={[0, 0, 4]} axis="x" m={M.steel} />;
     case "gear10":
       return <Gear teeth={10} />;
     case "gear20":
@@ -307,16 +316,18 @@ function Model({ type, glow = 0, burned = false, on = true }: { type: string } &
           <Cyl r={4} h={21} p={[0, 0, 30]} axis="y" m={M.hole} seg={12} />
         </group>
       );
-    case "link":
+    case "link": {
+      const e = size[0] / 2 - 7;
       return (
         <group>
-          <Box s={[86, 14, 6]} m={M.steel} />
-          <Cyl r={7} h={6} p={[-43, 0, 0]} m={M.steel} />
-          <Cyl r={7} h={6} p={[43, 0, 0]} m={M.steel} />
-          <Cyl r={3} h={6.4} p={[-43, 0, -0.2]} m={M.hole} seg={12} />
-          <Cyl r={3} h={6.4} p={[43, 0, -0.2]} m={M.hole} seg={12} />
+          <Box s={[2 * e, 14, 6]} m={M.steel} />
+          <Cyl r={7} h={6} p={[-e, 0, 0]} m={M.steel} />
+          <Cyl r={7} h={6} p={[e, 0, 0]} m={M.steel} />
+          <Cyl r={3} h={6.4} p={[-e, 0, -0.2]} m={M.hole} seg={12} />
+          <Cyl r={3} h={6.4} p={[e, 0, -0.2]} m={M.hole} seg={12} />
         </group>
       );
+    }
     case "joint":
       return (
         <group>
@@ -329,7 +340,7 @@ function Model({ type, glow = 0, burned = false, on = true }: { type: string } &
     case "profile60":
     case "profile120":
     case "profile240": {
-      const len = sizeOf(type)[0];
+      const len = size[0];
       return (
         <group>
           <Box s={[len, 10, 10]} m={M.steel} />
@@ -340,8 +351,8 @@ function Model({ type, glow = 0, burned = false, on = true }: { type: string } &
     case "plate":
       return (
         <group>
-          <Box s={[160, 100, 6]} m={M.dark} />
-          <Holes len={160} rows={PLATE_ROWS} z={6} every={20} />
+          <Box s={[size[0], size[1], 6]} m={M.dark} />
+          <Holes len={size[0]} rows={plateRows(size[1])} z={6} every={20} />
         </group>
       );
     case "bolt":
@@ -381,11 +392,11 @@ function Model({ type, glow = 0, burned = false, on = true }: { type: string } &
 }
 
 /** Modelo centrado en su caja: el contenedor lo puede girar sobre su centro. */
-export function PartModel({ type, glow, burned, on }: { type: string } & ModelState) {
-  const h = sizeOf(type)[2];
+export function PartModel({ type, glow, burned, on, props }: { type: string; props?: Record<string, unknown> } & ModelState) {
+  const size = sizeOf(type, props);
   return (
-    <group position={[0, 0, -h / 2]}>
-      <Model type={type} glow={glow} burned={burned} on={on} />
+    <group position={[0, 0, -size[2] / 2]}>
+      <Model type={type} glow={glow} burned={burned} on={on} size={size} />
     </group>
   );
 }

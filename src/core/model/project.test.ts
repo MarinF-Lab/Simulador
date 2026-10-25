@@ -28,3 +28,13 @@ describe("findFree", () => {
     expect(sepX || sepY).toBe(true);
   });
 });
+
+describe("tamaños editables", () => {
+  it("una placa usa su largo y ancho propios", () => {
+    expect(extent(part({ type: "plate", props: { lx: 300, ly: 200 } }))).toEqual([300, 200, 6]);
+    expect(extent(part({ type: "plate", props: { lx: 300 }, rot: [0, 0, 1] }))).toEqual([100, 300, 6]);
+  });
+  it("las piezas sin tamaño editable ignoran lx", () => {
+    expect(extent(part({ type: "source", props: { lx: 500 } }))).toEqual([60, 30, 30]);
+  });
+});

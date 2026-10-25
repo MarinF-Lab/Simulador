@@ -3,7 +3,7 @@ import type { Part, Project } from "../model/project";
 import { emptyHistory, exec, record, redo, removeCmd, undo, updateCmd } from "./commands";
 
 const part = (id: number, x = 0): Part => ({ id, type: "gear10", x, y: 0, z: 0, rot: [0, 0, 0], props: {} });
-const base = (): Project => ({ parts: [part(1), part(2, 100), part(3, 200)], nextId: 4 });
+const base = (): Project => ({ parts: [part(1), part(2, 100), part(3, 200)], cables: [], nextId: 4 });
 
 describe("historial", () => {
   it("agregar, deshacer y rehacer", () => {
@@ -48,5 +48,19 @@ describe("historial", () => {
     h = record(h, { kind: "add", part: part(5) });
     expect(h.future).toHaveLength(0);
     expect(p.parts).toHaveLength(3);
+  });
+});
+
+describe("cables y acciones compuestas", () => {
+  const cable = (id: number) => ({ id, ends: [{ att: { part: 1, t: 0 }, x: 0, y: 0, z: 0 }, { att: null, x: 50, y: 0, z: 0 }] as [never, never] });
+  it("un lote se deshace completo", () => {
+    let p: Project = { ...base(), cables: [cable(9)] };
+    let h = emptyHistory();
+    [p, h] = exec(p, h, { kind: "batch", cmds: [removeCmd(p, 1)!, { kind: "removeCable", cable: p.cables[0]!, index: 0 }] });
+    expect(p.parts).toHaveLength(2);
+    expect(p.cables).toHaveLength(0);
+    [p, h] = undo(p, h);
+    expect(p.parts.map((x) => x.id)).toEqual([1, 2, 3]);
+    expect(p.cables.map((x) => x.id)).toEqual([9]);
   });
 });

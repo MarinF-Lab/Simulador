@@ -12,6 +12,8 @@ export interface SceneApi {
   isoView: () => void;
   /** Arrastre que empieza fuera del lienzo (desde la biblioteca). */
   externalDrag: (id: number | null, clientX?: number, clientY?: number) => void;
+  /** Punto de la pantalla donde se ve un punto de la mesa (para pruebas automáticas). */
+  toScreen: (p: [number, number, number]) => { x: number; y: number };
 }
 
 const noop = () => {};
@@ -23,6 +25,7 @@ export const sceneApi: SceneApi = {
   rotateView: noop,
   isoView: noop,
   externalDrag: noop,
+  toScreen: () => ({ x: 0, y: 0 }),
 };
 
 /** Elementos HTML que la escena mueve en cada cuadro (botón ⟳ y ejes). */

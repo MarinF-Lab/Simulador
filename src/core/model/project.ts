@@ -22,8 +22,23 @@ export interface Part {
   props: Record<string, PropValue>;
 }
 
+/** Punta de un cable: pegada a un borne de una pieza, o suelta en una posición. */
+export interface CableEnd {
+  att: { part: number; t: number } | null;
+  x: number;
+  y: number;
+  z: number;
+}
+
+export interface Cable {
+  id: number;
+  ends: [CableEnd, CableEnd];
+}
+
 export interface Project {
   parts: Part[];
+  cables: Cable[];
+  /** Contador compartido: piezas y cables nunca repiten id. */
   nextId: number;
 }
 
@@ -53,17 +68,18 @@ function quarter(v: Vec3, axis: Axis): Vec3 {
   return [-y, x, z];
 }
 
-/** Tamaño de la caja que ocupa la pieza ya girada. Mismo orden que Euler XYZ de Three.js. */
+/** Gira un vector local según los cuartos de vuelta de la pieza (Euler XYZ de Three.js: Z, luego Y, luego X). */
+export function rotateLocal(v: Vec3, rot: Vec3): Vec3 {
+  let out: Vec3 = [...v];
+  const order: [Axis, number][] = [["z", rot[2]], ["y", rot[1]], ["x", rot[0]]];
+  for (const [axis, n] of order) for (let i = 0; i < ((n % 4) + 4) % 4; i++) out = quarter(out, axis);
+  return out;
+}
+
+/** Tamaño de la caja que ocupa la pieza ya girada. */
 export function extent(part: Pick<Part, "type" | "rot">): Vec3 {
   const [sx, sy, sz] = sizeOf(part.type);
-  let ax: Vec3 = [sx, 0, 0], ay: Vec3 = [0, sy, 0], az: Vec3 = [0, 0, sz];
-  // Euler XYZ = Rx · Ry · Rz: se aplica Z primero, después Y y al final X.
-  const order: [Axis, number][] = [["z", part.rot[2]], ["y", part.rot[1]], ["x", part.rot[0]]];
-  for (const [axis, n] of order) {
-    for (let i = 0; i < ((n % 4) + 4) % 4; i++) {
-      ax = quarter(ax, axis); ay = quarter(ay, axis); az = quarter(az, axis);
-    }
-  }
+  const ax = rotateLocal([sx, 0, 0], part.rot), ay = rotateLocal([0, sy, 0], part.rot), az = rotateLocal([0, 0, sz], part.rot);
   const sum = (k: number) => Math.abs(ax[k]!) + Math.abs(ay[k]!) + Math.abs(az[k]!);
   return [sum(0), sum(1), sum(2)];
 }

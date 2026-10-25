@@ -5,6 +5,8 @@ import { extent, TABLE, type Part } from "../core/model/project";
 import { useProject } from "../store/project";
 import { Controller } from "./Controller";
 import { PartModel } from "./models";
+import { CableEnds, Cables, FlowTicker, Terminals } from "./Electrical";
+import { brightness } from "../core/electrical/analyze";
 
 const Q = Math.PI / 2;
 
@@ -47,21 +49,26 @@ function Table() {
   );
 }
 
-function SelectionBox({ part }: { part: Part }) {
+const BOX_COLOR = { sel: "#8b8bff", err: "#ef5a5a", warn: "#e8a93b" };
+
+/** Caja de aristas alrededor de una pieza: selección (índigo) o aviso (rojo o ámbar). */
+function OutlineBox({ part, kind, pad = 6 }: { part: Part; kind: keyof typeof BOX_COLOR; pad?: number }) {
   const [ex, ey, ez] = extent(part);
-  const geo = useMemo(() => new THREE.EdgesGeometry(new THREE.BoxGeometry(ex + 6, ey + 6, ez + 6)), [ex, ey, ez]);
+  const geo = useMemo(() => new THREE.EdgesGeometry(new THREE.BoxGeometry(ex + pad, ey + pad, ez + pad)), [ex, ey, ez, pad]);
   return (
     <lineSegments geometry={geo} position={[part.x, part.y, part.z + ez / 2]}>
-      <lineBasicMaterial color="#8b8bff" />
+      <lineBasicMaterial color={BOX_COLOR[kind]} />
     </lineSegments>
   );
 }
 
 function Part3D({ part }: { part: Part }) {
   const ez = extent(part)[2];
+  const reading = useProject((s) => s.circuit.readings[part.id]);
+  const glow = part.type === "lamp" || part.type === "led" ? brightness(part.type, part.props, reading) : 0;
   return (
     <group position={[part.x, part.y, part.z + ez / 2]} rotation={[part.rot[0] * Q, part.rot[1] * Q, part.rot[2] * Q]} userData={{ partId: part.id }}>
-      <PartModel type={part.type} />
+      <PartModel type={part.type} glow={glow} burned={part.props.burned === true} />
     </group>
   );
 }
@@ -87,6 +94,7 @@ export function Scene() {
   const parts = useProject((s) => s.project.parts);
   const selected = useProject((s) => s.selected);
   const sel = parts.find((p) => p.id === selected);
+  const flag = useProject((s) => s.circuit.flag);
   return (
     <Canvas
       shadows
@@ -104,7 +112,12 @@ export function Scene() {
       <group name="parts">
         {parts.map((p) => <Part3D key={p.id} part={p} />)}
       </group>
-      {sel && <SelectionBox part={sel} />}
+      {parts.filter((p) => flag[p.id] && p.id !== selected).map((p) => <OutlineBox key={p.id} part={p} kind={flag[p.id]!} pad={4} />)}
+      {sel && <OutlineBox part={sel} kind="sel" />}
+      <Terminals />
+      <Cables />
+      <CableEnds />
+      <FlowTicker />
       <Controller />
     </Canvas>
   );

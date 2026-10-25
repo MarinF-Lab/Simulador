@@ -1,8 +1,10 @@
 import { useEffect, useRef } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
-import { bounds, extent, TABLE } from "../core/model/project";
-import { useProject } from "../store/project";
+import { bounds, extent, TABLE, type Cable, type Vec3 } from "../core/model/project";
+import { endPos, TERMINALS, termWorld } from "../core/model/terminals";
+import { snap } from "../core/model/units";
+import { useProject, type TermRef } from "../store/project";
 import { overlay, sceneApi } from "./api";
 
 // Cámara ortográfica libre y gestos de la mesa:
@@ -16,10 +18,15 @@ const EL_MIN = (15 * Math.PI) / 180, EL_MAX = (89 * Math.PI) / 180;
 const ORBIT_PX = 0.008, TILT_PX = 0.006; // radianes por píxel
 const ZMIN = 0.15, ZMAX = 8;
 const EDGE = 30, EDGE_SPEED = 9; // px
+const SNAP_PX = 28; // radio del imán de bornes y puntas, en pantalla
 
 type Drag =
   | { kind: "orbit"; pid: number; lx: number; ly: number }
-  | { kind: "pan"; pid: number; sx: number; sy: number; p0: THREE.Vector3; moved: boolean }
+  | { kind: "pan"; pid: number; sx: number; sy: number; p0: THREE.Vector3; moved: boolean; tapCable: number | null }
+  /** Desde un borne: tocar = dejarlo pendiente; arrastrar = cable nuevo. */
+  | { kind: "term"; pid: number; sx: number; sy: number; ref: TermRef; moved: boolean; wire: number | null }
+  /** Punta de un cable existente. */
+  | { kind: "end"; pid: number; sx: number; sy: number; id: number; i: 0 | 1; before: Cable["ends"]; moved: boolean }
   | { kind: "part"; pid: number; sx: number; sy: number; id: number; off: { x: number; y: number }; from: { x: number; y: number }; moved: boolean }
   | { kind: "ext"; id: number };
 
@@ -122,35 +129,93 @@ export function Controller() {
     invalidate();
   };
 
-  const hitPart = (cx: number, cy: number): number | null => {
+  type Hit = { kind: "end"; id: number; i: 0 | 1 } | { kind: "term"; ref: TermRef } | { kind: "part"; id: number } | { kind: "cable"; id: number };
+
+  /** Qué hay bajo el dedo. Prioridad: puntas de cable, bornes (si no están tapados), piezas y cables. */
+  const hitAny = (cx: number, cy: number): Hit | null => {
     const r = rect();
     const ndc = new THREE.Vector2(((cx - r.left) / r.width) * 2 - 1, -((cy - r.top) / r.height) * 2 + 1);
     ray.current.setFromCamera(ndc, cam);
-    const group = scene.getObjectByName("parts");
-    if (!group) return null;
-    for (const h of ray.current.intersectObjects(group.children, true)) {
-      let o: THREE.Object3D | null = h.object;
+    const first = (name: string) => {
+      const g = scene.getObjectByName(name);
+      return g ? ray.current.intersectObjects(g.children, true)[0] : undefined;
+    };
+    const end = first("ends");
+    if (end?.object.userData.cableEnd) return { kind: "end", ...(end.object.userData.cableEnd as { id: number; i: 0 | 1 }) };
+    const term = first("terms"), part = first("parts"), cab = first("cables");
+    if (term && (!part || term.distance <= part.distance + 15)) return { kind: "term", ref: term.object.userData.term as TermRef };
+    if (part && (!cab || part.distance <= cab.distance)) {
+      let o: THREE.Object3D | null = part.object;
       while (o && o.userData.partId === undefined) o = o.parent;
-      if (o) return o.userData.partId as number;
+      if (o) return { kind: "part", id: o.userData.partId as number };
+    }
+    if (cab) {
+      let o: THREE.Object3D | null = cab.object;
+      while (o && o.userData.cable === undefined) o = o.parent;
+      if (o) return { kind: "cable", id: o.userData.cable as number };
     }
     return null;
   };
 
-  /** Lleva la pieza arrastrada bajo el dedo. */
+  const tmpV = new THREE.Vector3();
+  const toScreen = (p: Vec3) => {
+    const r = rect();
+    tmpV.set(p[0], p[1], p[2]).project(cam);
+    return { x: r.left + ((tmpV.x + 1) / 2) * r.width, y: r.top + ((1 - tmpV.y) / 2) * r.height };
+  };
+
+  /** Imán: borne o punta de otro cable cerca del dedo; si no hay, el piso ajustado a 10 mm. */
+  const snapAt = (cx: number, cy: number, cableId: number): { p: Vec3; att: TermRef | null } | null => {
+    const pr = useProject.getState().project;
+    let best: { p: Vec3; att: TermRef | null } | null = null, bd = SNAP_PX;
+    for (const part of pr.parts) {
+      const n = TERMINALS[part.type]?.length ?? 0;
+      for (let t = 0; t < n; t++) {
+        const w = termWorld(part, t), s2 = toScreen(w), d = Math.hypot(s2.x - cx, s2.y - cy);
+        if (d < bd) { bd = d; best = { p: w, att: { part: part.id, t } }; }
+      }
+    }
+    for (const c of pr.cables) {
+      if (c.id === cableId) continue;
+      for (const e of c.ends) {
+        const w = endPos(pr, e), s2 = toScreen(w), d = Math.hypot(s2.x - cx, s2.y - cy);
+        if (d < bd) { bd = d; best = { p: w, att: e.att }; }
+      }
+    }
+    if (best) return best;
+    const g = ground(cx, cy);
+    if (!g) return null;
+    const hx = TABLE.w / 2 - 10, hy = TABLE.d / 2 - 10;
+    return { p: [Math.min(hx, Math.max(-hx, snap(g.x))), Math.min(hy, Math.max(-hy, snap(g.y))), 0], att: null };
+  };
+
+  /** Lleva lo arrastrado (pieza, punta o cable nuevo) bajo el dedo. */
   const followPointer = () => {
     const d = drag.current, l = last.current;
     if (!d || !l || d.kind === "pan" || d.kind === "orbit") return;
+    const st = useProject.getState();
+    if (d.kind === "term" || d.kind === "end") {
+      const id = d.kind === "term" ? d.wire : d.id;
+      if (id === null) return;
+      const sn = snapAt(l.x, l.y, id);
+      if (sn) st.moveEndLive(id, d.kind === "term" ? 1 : d.i, sn.p, sn.att);
+      return;
+    }
     const g = ground(l.x, l.y);
     if (!g) return;
+    if (d.kind === "ext" && st.project.cables.some((c) => c.id === d.id)) {
+      st.moveCableLive(d.id, g.x, g.y);
+      return;
+    }
     const off = d.kind === "part" ? d.off : { x: 0, y: 0 };
-    useProject.getState().moveLive(d.id, g.x + off.x, g.y + off.y);
+    st.moveLive(d.id, g.x + off.x, g.y + off.y);
   };
 
   /** Autodesplazamiento cerca del borde mientras se arrastra una pieza. */
   const edgeTick = () => {
     edgeRaf.current = 0;
     const d = drag.current, l = last.current;
-    if (!d || d.kind === "pan" || d.kind === "orbit" || (d.kind === "part" && !d.moved) || !l) return;
+    if (!d || d.kind === "pan" || d.kind === "orbit" || (d.kind !== "ext" && !d.moved) || !l) return;
     const r = rect();
     const inside = l.x >= r.left && l.x <= r.right && l.y >= r.top && l.y <= r.bottom;
     if (inside) {
@@ -218,13 +283,19 @@ export function Controller() {
         drag.current = { kind: "orbit", pid: e.pointerId, lx: e.clientX, ly: e.clientY };
         return;
       }
-      const id = hitPart(e.clientX, e.clientY);
+      const hit = hitAny(e.clientX, e.clientY);
       const g = ground(e.clientX, e.clientY);
-      if (id !== null && g) {
-        const p = P().project.parts.find((q) => q.id === id)!;
-        drag.current = { kind: "part", pid: e.pointerId, sx: e.clientX, sy: e.clientY, id, off: { x: p.x - g.x, y: p.y - g.y }, from: { x: p.x, y: p.y }, moved: false };
+      const base = { pid: e.pointerId, sx: e.clientX, sy: e.clientY, moved: false };
+      if (hit?.kind === "end") {
+        const c = P().project.cables.find((q) => q.id === hit.id)!;
+        drag.current = { kind: "end", ...base, id: hit.id, i: hit.i, before: c.ends };
+      } else if (hit?.kind === "term") {
+        drag.current = { kind: "term", ...base, ref: hit.ref, wire: null };
+      } else if (hit?.kind === "part" && g) {
+        const p = P().project.parts.find((q) => q.id === hit.id)!;
+        drag.current = { kind: "part", ...base, id: hit.id, off: { x: p.x - g.x, y: p.y - g.y }, from: { x: p.x, y: p.y } };
       } else if (g) {
-        drag.current = { kind: "pan", pid: e.pointerId, sx: e.clientX, sy: e.clientY, p0: g, moved: false };
+        drag.current = { kind: "pan", ...base, p0: g, tapCable: hit?.kind === "cable" ? hit.id : null };
       }
     };
 
@@ -262,6 +333,8 @@ export function Controller() {
       if (!d.moved && Math.hypot(e.clientX - d.sx, e.clientY - d.sy) > 6) {
         d.moved = true;
         if (d.kind === "part") P().beginDrag(d.id);
+        if (d.kind === "term") d.wire = P().startWire(d.ref);
+        if (d.kind === "end") P().beginEndDrag(d.id);
       }
       if (!d.moved) return;
       if (d.kind === "pan") {
@@ -286,7 +359,21 @@ export function Controller() {
       if (d.kind === "orbit") return;
       const cancel = e.type === "pointercancel";
       if (d.kind === "pan") {
-        if (!d.moved && !cancel) P().select(null);
+        if (!d.moved && !cancel) {
+          if (d.tapCable !== null) P().select(d.tapCable);
+          else { P().select(null); P().cancelPending(); }
+        }
+      } else if (d.kind === "term") {
+        if (!d.moved) { if (!cancel) P().tapTerminal(d.ref); }
+        else if (d.wire !== null) {
+          const c = P().project.cables.find((q) => q.id === d.wire);
+          const back = c?.ends[1].att && c.ends[1].att.part === d.ref.part && c.ends[1].att.t === d.ref.t;
+          if (cancel || back) P().dropTemp(d.wire);
+          else P().commitTemp(d.wire);
+        }
+      } else if (d.kind === "end") {
+        if (d.moved) P().endEndDrag(d.id, d.before);
+        else if (!cancel) P().select(d.id);
       } else if (d.moved) {
         P().endDrag(d.id, d.from);
       } else if (!cancel) {
@@ -326,6 +413,7 @@ export function Controller() {
       zoomAt(r.left + r.width / 2, r.top + r.height / 2, f);
     };
     sceneApi.fit = fit;
+    sceneApi.toScreen = toScreen;
     sceneApi.rotateView = (dir) => {
       const v = view.current;
       // Lleva a la siguiente vista isométrica (45° + múltiplos de 90°).

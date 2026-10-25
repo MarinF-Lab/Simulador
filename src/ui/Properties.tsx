@@ -1,7 +1,10 @@
 import { useEffect, useState } from "react";
-import { ChevronDown, ChevronUp, RotateCw, Trash2 } from "lucide-react";
+import { ArrowLeftRight, ChevronDown, ChevronUp, RotateCw, Trash2 } from "lucide-react";
+import { brightness, ELEC_DEFAULTS } from "../core/electrical/analyze";
+import type { Issue } from "../core/electrical/circuit";
 import { findItem } from "../core/model/catalog";
-import { fmt, parseDecimal } from "../core/model/units";
+import { endPos, POLAR, posKey } from "../core/model/terminals";
+import { fmt, fmtA, fmtV, parseDecimal } from "../core/model/units";
 import { extent, type Axis, type PropValue } from "../core/model/project";
 import { useProject } from "../store/project";
 import { useUI } from "../store/ui";
@@ -52,6 +55,21 @@ function FieldRow({ partId, field }: { partId: number; field: Field }) {
     );
   }
   const v: PropValue = stored?.[field.key] ?? field.def;
+  if (field.type === "choices") {
+    const label = (x: number) => (x >= 1000 ? `${fmt(x / 1000)} k${field.unit}` : `${fmt(x)} ${field.unit}`);
+    return (
+      <div className="flex flex-col gap-2 py-1 text-sm">
+        <span>{field.label}</span>
+        <div className="flex flex-wrap gap-1.5">
+          {field.values.map((x) => (
+            <button key={x} onClick={() => setProp(partId, field.key, x)} aria-pressed={v === x} className={"min-h-10 rounded-md border px-3 font-mono text-xs " + (v === x ? "border-accent bg-accent text-accent-ink" : "border-line")}>
+              {label(x)}
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
   const set = (nv: PropValue) => setProp(partId, field.key, nv);
   const id = `f-${partId}-${field.key}`;
 
@@ -180,48 +198,190 @@ function Placement({ id }: { id: number }) {
   );
 }
 
-export function Properties() {
-  const part = useProject((s) => s.project.parts.find((p) => p.id === s.selected));
-  const remove = useProject((s) => s.remove);
-  const running = useUI((s) => s.running);
-  const item = part ? findItem(part.type) : undefined;
+const DOT: Record<Issue["s"], string> = { err: "bg-err", warn: "bg-warn", info: "bg-muted", ok: "bg-ok" };
 
-  if (!part || !item) {
-    return <p className="px-4 py-6 text-sm text-muted">Toca una pieza de la mesa para ver y cambiar sus propiedades.</p>;
-  }
-  const sections = sectionsFor(item.kind);
-
+function IssueList({ issues }: { issues: Issue[] }) {
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-3 pb-4">
-      <div className="flex items-center gap-3 rounded-xl border border-line bg-panel-2/60 p-3">
-        <PartIcon kind={item.kind} className="size-10 text-ink/85" />
-        <div className="min-w-0 flex-1">
-          <p className="font-semibold">{item.name}</p>
-          <p className="text-xs text-muted">{item.variant ? `${item.variant} · ` : ""}Pieza n.º {part.id}</p>
-        </div>
-        <button onClick={() => remove(part.id)} aria-label="Eliminar pieza" title="Eliminar (Supr)" className="grid size-11 place-items-center rounded-lg text-muted hover:bg-panel hover:text-err">
-          <Trash2 className="size-5" />
-        </button>
-      </div>
-
-      <Placement id={part.id} />
-
-      {sections.map((sec) => (
-        <section key={sec.id} className="rounded-xl border border-line px-3 py-2">
-          <h3 className="pb-1 text-xs font-semibold tracking-widest text-muted uppercase">{sec.title}</h3>
-          <div className="flex flex-col divide-y divide-line/60">
-            {sec.fields.map((f, i) => <FieldRow key={f.type === "reading" ? i : f.key} partId={part.id} field={f} />)}
-          </div>
-        </section>
+    <ul className="flex flex-col gap-2.5">
+      {issues.map((x, i) => (
+        <li key={i} className="grid grid-cols-[10px_minmax(0,1fr)] gap-2.5 text-sm">
+          <span className={"mt-1.5 size-2.5 rounded-full " + DOT[x.s]} aria-hidden="true" />
+          <span><b className="font-semibold">{x.h}.</b> <span className="text-ink/85">{x.t}</span></span>
+        </li>
       ))}
+    </ul>
+  );
+}
 
-      <section className="rounded-xl border border-line px-3 py-3">
-        <h3 className="pb-2 text-xs font-semibold tracking-widest text-muted uppercase">Estado del componente</h3>
+/** Lista completa de avisos del circuito. */
+export function CircuitStatus() {
+  const issues = useProject((s) => s.circuit.issues);
+  return (
+    <section className="rounded-xl border border-line px-3 py-3" aria-live="polite">
+      <h3 className="pb-2 text-xs font-semibold tracking-widest text-muted uppercase">Estado del circuito</h3>
+      <IssueList issues={issues} />
+    </section>
+  );
+}
+
+function Cell({ k, v, big }: { k: string; v: string; big?: boolean }) {
+  return (
+    <div className="min-w-0 rounded-lg bg-panel-2 px-2.5 py-2">
+      <span className="block text-[10px] font-semibold tracking-widest text-muted uppercase">{k}</span>
+      <strong className={"block font-mono tabular-nums " + (big ? "text-lg" : "text-sm")}>{v}</strong>
+    </div>
+  );
+}
+
+/** Lecturas en vivo: voltaje primero, corriente en A como dato secundario. */
+function Readings({ id, type }: { id: number; type: string }) {
+  const r = useProject((s) => s.circuit.readings[id]);
+  const found = useProject((s) => s.project.parts.find((p) => p.id === id)?.props);
+  if (!r) return null;
+  const props = found ?? {};
+  const third = (() => {
+    if (type === "lamp" || type === "led") return <Cell k="Brillo" v={`${Math.round(brightness(type, props, r) * 100)} %`} />;
+    if (type === "switch") return <Cell k="Estado" v={props.closed === false ? "abierto" : "cerrado"} />;
+    if (type === "meter") return <Cell k="Mide" v="entre bornes" />;
+    return <Cell k="Potencia" v={`${Math.abs(r.v * r.i).toLocaleString("es-CL", { maximumFractionDigits: 3 })} W`} />;
+  })();
+  return (
+    <section className="rounded-xl border border-line px-3 py-2">
+      <h3 className="pb-2 text-xs font-semibold tracking-widest text-muted uppercase">Lecturas</h3>
+      <div className="grid grid-cols-3 gap-2 pb-1">
+        <Cell k={type === "source" ? "En bornes" : "Voltaje"} v={fmtV(r.v)} big />
+        <Cell k="Corriente" v={type === "meter" ? "—" : fmtA(r.i)} />
+        {third}
+      </div>
+    </section>
+  );
+}
+
+function ComponentStatus({ id }: { id: number }) {
+  const issues = useProject((s) => s.circuit.issues);
+  const mine = issues.filter((x) => x.ids.includes(id));
+  const running = useUI((s) => s.running);
+  return (
+    <section className="rounded-xl border border-line px-3 py-3">
+      <h3 className="pb-2 text-xs font-semibold tracking-widest text-muted uppercase">Estado del componente</h3>
+      {mine.length ? (
+        <IssueList issues={mine} />
+      ) : (
         <p className="flex items-center gap-2 text-sm">
           <span className="size-2.5 shrink-0 rounded-full bg-ok" aria-hidden="true" />
           {running ? "Funcionando correctamente" : "Sin problemas detectados"}
         </p>
+      )}
+    </section>
+  );
+}
+
+function CablePanel({ id }: { id: number }) {
+  const project = useProject((s) => s.project);
+  const circuit = useProject((s) => s.circuit);
+  const remove = useProject((s) => s.remove);
+  const c = project.cables.find((x) => x.id === id);
+  if (!c) return null;
+  const loose = c.ends.filter((e) => circuit.occAt(posKey(endPos(project, e))) < 2).length;
+  const side = circuit.side[id];
+  const i = circuit.readings[id]?.i ?? 0;
+  return (
+    <>
+      <div className="flex items-center gap-3 rounded-xl border border-line bg-panel-2/60 p-3">
+        <PartIcon kind="wire" className="size-10 text-ink/85" />
+        <div className="min-w-0 flex-1">
+          <p className="font-semibold">Cable</p>
+          <p className="text-xs text-muted">Cable n.º {id}</p>
+        </div>
+        <button onClick={() => remove(id)} aria-label="Eliminar cable" title="Eliminar (Supr)" className="grid size-11 place-items-center rounded-lg text-muted hover:bg-panel hover:text-err">
+          <Trash2 className="size-5" />
+        </button>
+      </div>
+      <section className="rounded-xl border border-line px-3 py-2">
+        <h3 className="pb-2 text-xs font-semibold tracking-widest text-muted uppercase">Lecturas</h3>
+        <div className="grid grid-cols-3 gap-2 pb-1">
+          <Cell k="Lado" v={side === "+" ? "+ rojo" : side === "-" ? "− azul" : "neutro"} />
+          <Cell k="Corriente" v={fmtA(i)} />
+          <Cell k="Puntas" v={loose ? `${loose} suelta${loose > 1 ? "s" : ""}` : "conectadas"} />
+        </div>
       </section>
+      <p className="px-1 text-sm text-muted">Arrastra cada punta hasta un borne para conectarla. Puedes juntar varias puntas en un mismo borne para hacer una derivación.</p>
+      <ComponentStatus id={id} />
+    </>
+  );
+}
+
+export function Properties() {
+  const selected = useProject((s) => s.selected);
+  const part = useProject((s) => s.project.parts.find((p) => p.id === s.selected));
+  const isCable = useProject((s) => s.project.cables.some((c) => c.id === s.selected));
+  const { remove, setProp, replace, flip } = useProject();
+  const item = part ? findItem(part.type) : undefined;
+
+  const body = (() => {
+    if (isCable && selected !== null) return <CablePanel id={selected} />;
+    if (!part || !item) {
+      return <p className="px-1 text-sm text-muted">Toca una pieza o un cable de la mesa para ver sus lecturas y cambiar sus propiedades. Para unir dos bornes, tócalos uno después del otro.</p>;
+    }
+    const sections = sectionsFor(item.kind);
+    const burned = part.props.burned === true;
+    const closed = part.props.closed ?? ELEC_DEFAULTS.switch!.closed;
+    return (
+      <>
+        <div className="flex items-center gap-3 rounded-xl border border-line bg-panel-2/60 p-3">
+          <PartIcon kind={item.kind} className="size-10 text-ink/85" />
+          <div className="min-w-0 flex-1">
+            <p className="font-semibold">{item.name}</p>
+            <p className="text-xs text-muted">{item.variant ? `${item.variant} · ` : ""}Pieza n.º {part.id}</p>
+          </div>
+          <button onClick={() => remove(part.id)} aria-label="Eliminar pieza" title="Eliminar (Supr)" className="grid size-11 place-items-center rounded-lg text-muted hover:bg-panel hover:text-err">
+            <Trash2 className="size-5" />
+          </button>
+        </div>
+
+        {burned && (
+          <div className="flex items-center gap-3 rounded-xl border border-err/50 bg-err/10 p-3 text-sm">
+            <p className="flex-1">Esta pieza se quemó. Corrige el circuito y reemplázala.</p>
+            <button onClick={() => replace(part.id)} className="min-h-11 rounded-lg bg-err px-3 font-semibold text-white">Reemplazar</button>
+          </div>
+        )}
+
+        <Readings id={part.id} type={part.type} />
+
+        {(part.type === "switch" || POLAR.has(part.type)) && (
+          <div className="flex flex-wrap gap-2">
+            {part.type === "switch" && (
+              <button onClick={() => setProp(part.id, "closed", !closed)} className="min-h-11 flex-1 rounded-lg bg-accent px-3 text-sm font-semibold text-accent-ink">
+                {closed ? "Abrir interruptor" : "Cerrar interruptor"}
+              </button>
+            )}
+            {POLAR.has(part.type) && (
+              <button onClick={() => flip(part.id)} className="flex min-h-11 flex-1 items-center justify-center gap-2 rounded-lg border border-line px-3 text-sm font-medium hover:border-accent/60">
+                <ArrowLeftRight className="size-4" aria-hidden="true" /> Invertir polaridad
+              </button>
+            )}
+          </div>
+        )}
+
+        {sections.map((sec) => (
+          <section key={sec.id} className="rounded-xl border border-line px-3 py-2">
+            <h3 className="pb-1 text-xs font-semibold tracking-widest text-muted uppercase">{sec.title}</h3>
+            <div className="flex flex-col divide-y divide-line/60">
+              {sec.fields.map((f, i) => <FieldRow key={f.type === "reading" ? i : f.key} partId={part.id} field={f} />)}
+            </div>
+          </section>
+        ))}
+
+        <Placement id={part.id} />
+        <ComponentStatus id={part.id} />
+      </>
+    );
+  })();
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-3 pb-4">
+      {body}
+      <CircuitStatus />
     </div>
   );
 }

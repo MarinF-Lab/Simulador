@@ -29,6 +29,30 @@ function density(type: string): number {
   return 1200;
 }
 
+/** Formas de choque de una pieza, en el marco de su cuerpo (que empieza sin girar). */
+function colliderShapes(part: Part): RAPIER.ColliderDesc[] {
+  const [sx, sy, sz] = sizeOf(part.type, part.props);
+  const q = partQuat(part.rot);
+  const rot = (r: number[]) => ({ x: r[0]!, y: r[1]!, z: r[2]!, w: r[3]! });
+  const box = (h: Vec3, o: Vec3 = [0, 0, 0]) => {
+    const t = rotateLocal(o, part.rot);
+    return RAPIER.ColliderDesc.cuboid(h[0] * S, h[1] * S, h[2] * S).setTranslation(t[0] * S, t[1] * S, t[2] * S).setRotation(rot(q));
+  };
+  switch (part.type) {
+    // La rueda es un cilindro: Rapier lo hace a lo largo de Y y la pieza lo tiene en Z.
+    case "wheel":
+      return [RAPIER.ColliderDesc.cylinder((sz / 2) * S, (sx / 2) * S).setRotation(rot(qmul(q, [Math.SQRT1_2, 0, 0, Math.SQRT1_2])))];
+    // El cilindro del pistón llega 6 mm por debajo del perno: la biela pasa por encima sin rozarlo.
+    case "piston":
+      return [box([sx / 2, sy / 2, sz / 2 - 3], [0, 0, -3])];
+    // La escuadra es una L: la base y el ala, sin llenar el hueco entre ellas.
+    case "bracket":
+      return [box([sx / 2, sy / 2, 2], [0, 0, -sz / 2 + 2]), box([sx / 2, 2, sz / 2], [0, -sy / 2 + 2, 0])];
+    default:
+      return [box([sx / 2, sy / 2, sz / 2])];
+  }
+}
+
 export interface Pose {
   /** Centro de la pieza en mm. */
   p: Vec3;
@@ -207,27 +231,12 @@ export class Sim {
       const base = fixed ? RAPIER.RigidBodyDesc.fixed() : kin.has(part.id) ? RAPIER.RigidBodyDesc.kinematicPositionBased() : RAPIER.RigidBodyDesc.dynamic();
       const desc = base.setTranslation(c[0] * S, c[1] * S, c[2] * S);
       const body = this.world.createRigidBody(desc);
-      const [sx, sy, sz] = sizeOf(part.type, part.props);
-      const q = partQuat(part.rot);
-      // La rueda es un cilindro de goma; Rapier lo hace a lo largo de Y y la pieza lo tiene en Z.
-      const wheel = part.type === "wheel";
-      // El cilindro del pistón llega 6 mm por debajo del perno: la biela pasa por encima sin rozarlo.
-      const lower = part.type === "piston" ? 3 : 0;
-      const shape = wheel ? RAPIER.ColliderDesc.cylinder((sz / 2) * S, (sx / 2) * S) : RAPIER.ColliderDesc.cuboid((sx / 2) * S, (sy / 2) * S, (sz / 2 - lower) * S);
-      if (lower) {
-        const off = rotateLocal([0, 0, -lower], part.rot);
-        shape.setTranslation(off[0] * S, off[1] * S, off[2] * S);
-      }
-      const qr = wheel ? qmul(q, [Math.SQRT1_2, 0, 0, Math.SQRT1_2]) : q;
-      const col = this.world.createCollider(
-        shape
-          .setRotation({ x: qr[0], y: qr[1], z: qr[2], w: qr[3] })
-          .setDensity(density(part.type))
-          .setFriction(wheel ? 1.2 : 0.7),
-        body,
-      );
-      this.partOf.set(col.handle, part.id);
-      if (part.type === "sensorContact") this.sensors.push({ id: part.id, collider: col, ignore: new Set() });
+      // Una pieza puede tener varios colisionadores (la escuadra es una L); todos llevan a la pieza.
+      colliderShapes(part).forEach((shape, i) => {
+        const col = this.world.createCollider(shape.setDensity(density(part.type)).setFriction(part.type === "wheel" ? 1.2 : 0.7), body);
+        this.partOf.set(col.handle, part.id);
+        if (i === 0 && part.type === "sensorContact") this.sensors.push({ id: part.id, collider: col, ignore: new Set() });
+      });
       this.bodies.set(part.id, body);
       this.start.set(part.id, c);
     }

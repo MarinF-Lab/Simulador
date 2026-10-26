@@ -30,3 +30,5 @@ body { background: var(--color-bg); color: var(--color-ink); font-family: var(--
 .kin-chart .u-legend { color: var(--color-ink); font: 12px var(--font-mono); text-align: left; }
 .kin-chart .u-legend .u-marker { border-radius: 2px; }
 .kin-chart .u-legend th { font-weight: 500; color: var(--color-muted); }
+/* El buscador ya tiene su botón para borrar: se oculta el del navegador. */
+input[type="search"]::-webkit-search-cancel-button { -webkit-appearance: none; display: none; }

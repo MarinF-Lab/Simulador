@@ -505,6 +505,7 @@ export function Controller() {
     };
     sceneApi.fit = fit;
     sceneApi.toScreen = toScreen;
+    sceneApi.renderInfo = () => ({ calls: gl.info.render.calls, triangles: gl.info.render.triangles, geometries: gl.info.memory.geometries, textures: gl.info.memory.textures });
     sceneApi.rotateView = (dir) => {
       const v = view.current;
       // Lleva a la siguiente vista isométrica (45° + múltiplos de 90°).

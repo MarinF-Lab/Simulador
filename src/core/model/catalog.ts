@@ -7,7 +7,7 @@ export type PartKind =
   | "source" | "resistor" | "lamp" | "led" | "switch" | "wire" | "hbridge"
   | "dcmotor" | "stepper" | "servo" | "linear"
   | "shaft" | "gear" | "pulley" | "belt" | "bearing" | "support" | "link" | "joint"
-  | "profile" | "plate" | "bolt"
+  | "profile" | "plate" | "bolt" | "bracket"
   | "sensor" | "meter" | "text";
 
 export interface CatalogItem {
@@ -62,6 +62,7 @@ export const CATALOG: CatalogItem[] = [
   { id: "profile120", name: "Perfil metálico", kind: "profile", category: "structures", variant: "120 mm", desc: "Barra metálica con agujeros cada 10 mm, para armar estructuras. Su largo se cambia en Propiedades." },
   { id: "profile240", name: "Perfil metálico", kind: "profile", category: "structures", variant: "240 mm", desc: "Barra metálica con agujeros cada 10 mm, para armar estructuras. Su largo se cambia en Propiedades." },
   { id: "plate", name: "Placa base", kind: "plate", category: "structures", desc: "Base fija a la mesa, con agujeros cada 20 mm. Lo que se apoya encima queda unido a ella al simular. Su largo y ancho se cambian." },
+  { id: "bracket", name: "Escuadra", kind: "bracket", category: "structures", variant: "en L", tags: ["ángulo", "angulo", "soporte de servo"], desc: "Pieza en forma de L: agujeros en la base y en el ala vertical. Sirve para montar un servo de lado, por ejemplo sobre otro servo, y así armar brazos que suben y bajan." },
   { id: "bolt", name: "Unión", kind: "bolt", category: "structures", variant: "perno fijo", tags: ["perno", "tornillo"], desc: "Herramienta: une dos piezas por agujeros alineados para que no se muevan entre sí, como un perno. Elige Unión y toca una de las piezas." },
 
   { id: "sensorAngle", name: "Sensor", kind: "sensor", category: "other", variant: "de ángulo", tags: ["encoder"], desc: "Mide el ángulo de una junta o un eje. Móntalo en la junta y verás su ángulo en vivo al simular." },

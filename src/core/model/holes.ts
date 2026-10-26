@@ -52,6 +52,16 @@ function localHoles(part: Pick<Part, "type" | "props">): LocalHole[] {
       out = through(xs.flatMap((x) => ys.map((y) => [x, y] as [number, number])), h);
       break;
     }
+    // Escuadra (L): agujeros verticales en la base y horizontales en el ala, para montar un servo de lado.
+    case "bracket":
+      out = [
+        ...through([[-20, 2], [0, 2], [20, 2]], h).map((x) => ({ ...x, p: [x.p[0], x.p[1], x.n[2] > 0 ? -h / 2 + 4 : -h / 2] as Vec3 })),
+        ...[-24, 24].flatMap((x) => [
+          { p: [x, -ly / 2, 4] as Vec3, n: [0, -1, 0] as Vec3 },
+          { p: [x, -ly / 2 + 4, 4] as Vec3, n: [0, 1, 0] as Vec3 },
+        ]),
+      ];
+      break;
     case "link":
       out = through([[-(lx / 2 - 7), 0], [lx / 2 - 7, 0]], h);
       break;

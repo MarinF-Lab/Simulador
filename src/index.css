@@ -25,3 +25,8 @@ body { background: var(--color-bg); color: var(--color-ink); font-family: var(--
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* uPlot sobre el panel oscuro: leyenda con texto de la interfaz. */
+.kin-chart .u-legend { color: var(--color-ink); font: 12px var(--font-mono); text-align: left; }
+.kin-chart .u-legend .u-marker { border-radius: 2px; }
+.kin-chart .u-legend th { font-weight: 500; color: var(--color-muted); }

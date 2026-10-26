@@ -449,9 +449,39 @@ export function Controller() {
       }
     };
 
+    // Trackpad o rueda del mouse:
+    // - pellizco del trackpad (llega con ctrlKey) = zoom
+    // - dos dedos = desplazar; con Mayús = orbitar (horizontal) e inclinar (vertical)
+    // - rueda del mouse = zoom, como antes
+    let padUntil = 0;
     const wheel = (e: WheelEvent) => {
       e.preventDefault();
-      zoomAt(e.clientX, e.clientY, Math.exp(-e.deltaY * 0.0015));
+      if (e.ctrlKey) {
+        zoomAt(e.clientX, e.clientY, Math.exp(-e.deltaY * 0.01));
+        return;
+      }
+      // Un trackpad manda desplazamientos en píxeles, finos y a veces en X; la rueda, saltos grandes.
+      const now = performance.now();
+      const fine = e.deltaMode === 0 && (e.deltaX !== 0 || !Number.isInteger(e.deltaY) || Math.abs(e.deltaY) < 40);
+      if (fine) padUntil = now + 400;
+      const pad = fine || now < padUntil;
+      if (!pad) {
+        zoomAt(e.clientX, e.clientY, Math.exp(-e.deltaY * 0.0015));
+        return;
+      }
+      if (e.shiftKey) {
+        // Con Mayús algunos navegadores pasan el desplazamiento vertical a X: se usa el mayor.
+        const dx = e.deltaX, dy = e.deltaY;
+        orbit(-dx * ORBIT_PX * 0.6, dy * TILT_PX * 0.6);
+        return;
+      }
+      const a = ground(e.clientX, e.clientY), b = ground(e.clientX + e.deltaX, e.clientY + e.deltaY);
+      if (!a || !b) return;
+      view.current.tx += b.x - a.x;
+      view.current.ty += b.y - a.y;
+      clampView();
+      applyCamera();
+      invalidate();
     };
 
     el.addEventListener("pointerdown", down);

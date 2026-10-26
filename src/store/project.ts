@@ -158,16 +158,21 @@ function sample(): Project {
   const parts: Part[] = [bat, sw, res, lamp, P(8, "profile240", -60, -80), plate, motor, g10, axle, g40, link, arm, bat2];
   const cables = [wire(9, bat, 1, sw, 0), wire(10, sw, 1, res, 0), wire(11, res, 1, lamp, 1), wire(12, lamp, 0, bat, 0),
     wire(21, bat2, 1, motor, 1), wire(22, motor, 0, bat2, 0)];
-  // Brazo robótico de 2 articulaciones con servos (como en la referencia), alimentado con 6 V.
-  const plate2 = P(30, "plate", -200, -230, 0, { lx: 160, ly: 120 });
-  const servo1: Part = { id: 31, type: "servo", x: -220, y: -230, z: 6, rot: [0, 0, 0], props: { target: 30, speed: 60, torque: 0.8 } };
-  const link1 = onHole({ id: 32, type: "link", x: 0, y: 0, z: 0, rot: [0, 0, 0], props: { lx: 80 } }, 1, holesOf(servo1)[2]!.p);
-  const servo2 = onHole({ id: 33, type: "servo", x: 0, y: 0, z: 0, rot: [0, 0, 0], props: { target: -45, speed: 60, torque: 0.8 } }, 0, holesOf(link1)[2]!.p);
-  const link2 = onHole({ id: 34, type: "link", x: 0, y: 0, z: 0, rot: [0, 0, 0], props: { lx: 80 } }, 1, holesOf(servo2)[2]!.p);
-  const bat3 = P(35, "source", -300, -110, 0, { v: 6 });
-  parts.push(plate2, servo1, link1, servo2, link2, bat3);
-  cables.push(wire(36, bat3, 1, servo1, 1), wire(37, bat3, 0, servo1, 0), wire(38, servo1, 1, servo2, 1), wire(39, servo1, 0, servo2, 0));
-  const base: Project = { parts, cables, belts: [], nextId: 40 };
+  // Brazo robótico de 3 servos alimentado con 6 V: la base gira 180° sobre la placa, y una
+  // escuadra lleva el hombro y el codo de lado, para que el brazo suba y baje.
+  const plate2 = P(30, "plate", -200, -200, 0, { lx: 160, ly: 120 });
+  const servo1: Part = { id: 31, type: "servo", x: -220, y: -190, z: 6, rot: [0, 0, 0], props: { target: 45, speed: 60, torque: 0.8 } };
+  const side: Vec3 = [1, 0, 0]; // de lado: el brazo del servo mira hacia −Y y el ángulo positivo sube
+  const bracket = onHole({ id: 43, type: "bracket", x: 0, y: 0, z: 0, rot: [0, 0, 0], props: {} }, 3, holesOf(servo1)[2]!.p);
+  const servo2 = onHole({ id: 33, type: "servo", x: 0, y: 0, z: 0, rot: side, props: { target: 40, speed: 60, torque: 0.8 } }, 0, holesOf(bracket)[6]!.p);
+  const link1 = onHole({ id: 32, type: "link", x: 0, y: 0, z: 0, rot: side, props: { lx: 90 } }, 1, holesOf(servo2)[2]!.p);
+  const servo3 = onHole({ id: 44, type: "servo", x: 0, y: 0, z: 0, rot: side, props: { target: -60, speed: 60, torque: 0.8 } }, 0, holesOf(link1)[2]!.p);
+  const link2 = onHole({ id: 34, type: "link", x: 0, y: 0, z: 0, rot: side, props: { lx: 80 } }, 1, holesOf(servo3)[2]!.p);
+  const bat3 = P(35, "source", -330, -110, 0, { v: 6 });
+  parts.push(plate2, servo1, bracket, servo2, link1, servo3, link2, bat3);
+  cables.push(wire(36, bat3, 1, servo1, 1), wire(37, bat3, 0, servo1, 0), wire(38, servo1, 1, servo2, 1), wire(39, servo1, 0, servo2, 0),
+    wire(45, servo2, 1, servo3, 1), wire(46, servo2, 0, servo3, 0));
+  const base: Project = { parts, cables, belts: [], nextId: 47 };
   // Juntas: el eslabón en el eje del motor y el perfil sobre el otro extremo del eslabón.
   const onShaft = alignedPairs(base, 18).find((q) => q.shaft);
   const elbow = alignedPairs(base, 19).find((q) => q.b.part === 18);
@@ -175,11 +180,13 @@ function sample(): Project {
   if (onShaft) joints.push({ id: 23, kind: "revolute", a: onShaft.a, b: onShaft.b });
   if (elbow) joints.push({ id: 24, kind: "revolute", a: elbow.a, b: elbow.b });
   joints.push(
-    { id: 40, kind: "revolute", a: { part: 32, h: 1 }, b: { part: 31, h: 2 } }, // hombro: eslabón 1 en el servo 1
-    { id: 41, kind: "fixed", a: { part: 33, h: 0 }, b: { part: 32, h: 2 } }, // servo 2 atornillado al eslabón 1
-    { id: 42, kind: "revolute", a: { part: 34, h: 1 }, b: { part: 33, h: 2 } }, // codo: eslabón 2 en el servo 2
+    { id: 40, kind: "revolute", a: { part: 43, h: 3 }, b: { part: 31, h: 2 } }, // base: la escuadra gira sobre el servo 1
+    { id: 41, kind: "fixed", a: { part: 33, h: 0 }, b: { part: 43, h: 6 } }, // servo 2 atornillado de lado a la escuadra
+    { id: 42, kind: "revolute", a: { part: 32, h: 1 }, b: { part: 33, h: 2 } }, // hombro: eslabón 1 en el servo 2
+    { id: 47, kind: "fixed", a: { part: 44, h: 0 }, b: { part: 32, h: 2 } }, // servo 3 atornillado al final del eslabón 1
+    { id: 48, kind: "revolute", a: { part: 34, h: 1 }, b: { part: 44, h: 2 } }, // codo: eslabón 2 en el servo 3
   );
-  return { ...base, joints, nextId: 43 };
+  return { ...base, joints, nextId: 49 };
 }
 
 export const useProject = create<ProjectState>((set, get) => {

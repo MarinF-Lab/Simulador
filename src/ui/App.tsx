@@ -5,7 +5,8 @@ import { useProject } from "../store/project";
 import { Library } from "./Library";
 import { Properties } from "./Properties";
 import { TopBar } from "./TopBar";
-import { AnalysisView, Workspace } from "./Workspace";
+import { Workspace } from "./Workspace";
+import { AnalysisView } from "./Analysis";
 
 /** Columna lateral en escritorio; hoja deslizable desde abajo en celular. */
 function Panel({ which, title, Icon, side, children }: { which: Exclude<Sheet, null>; title: string; Icon: typeof Boxes; side: "left" | "right"; children: ReactNode }) {
@@ -70,7 +71,11 @@ export function App() {
         <Panel which="library" title="Componentes" Icon={Boxes} side="left">
           <Library />
         </Panel>
-        <main className="flex min-h-0 flex-col">{tab === "analysis" ? <AnalysisView /> : <Workspace />}</main>
+        {/* La mesa sigue montada (y simulando) mientras se miran los gráficos encima. */}
+        <main className="relative flex min-h-0 flex-col">
+          <Workspace />
+          {tab === "analysis" && <AnalysisView />}
+        </main>
         <Panel which="properties" title="Propiedades" Icon={SlidersHorizontal} side="right">
           <Properties />
         </Panel>

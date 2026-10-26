@@ -225,23 +225,3 @@ export function Workspace() {
     </div>
   );
 }
-
-export function AnalysisView() {
-  const charts = ["Voltaje en bornes (V)", "Corriente (A)", "RPM", "Par (N·m)", "Ángulo de articulaciones (°)"];
-  return (
-    <div className="min-h-0 flex-1 overflow-y-auto p-4 pb-28 lg:pb-4">
-      <div className="mx-auto grid max-w-4xl gap-3 sm:grid-cols-2">
-        {charts.map((c) => (
-          <section key={c} className="flex min-h-40 flex-col rounded-xl border border-line bg-panel p-3">
-            <h3 className="text-sm font-semibold">{c}</h3>
-            <div className="relative mt-2 flex-1 rounded-lg border border-dashed border-line">
-              <p className="absolute inset-0 grid place-items-center px-4 text-center text-xs text-muted">
-                Inicia la simulación para grabar este gráfico (etapa 7).
-              </p>
-            </div>
-          </section>
-        ))}
-      </div>
-    </div>
-  );
-}

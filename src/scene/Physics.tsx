@@ -4,6 +4,7 @@ import { coaxial, motorAxis, rotorAxis, centerOf } from "../core/mechanical/axes
 import { useProject } from "../store/project";
 import { simPoses, useSim } from "../store/sim";
 import type { Sim } from "../physics/world";
+import { useRecord } from "../store/record";
 
 /**
  * Mientras la simulación está iniciada: crea el mundo de Rapier desde el diseño, lo avanza
@@ -12,11 +13,17 @@ import type { Sim } from "../physics/world";
 export function PhysicsRunner() {
   const sim = useRef<Sim | null>(null);
   const since = useRef(0);
+  const sinceRec = useRef(0);
+  /** Último ángulo grabado de cada serie, para que no salte de +180° a −180° al dar la vuelta. */
+  const lastAngle = useRef(new Map<string, number>());
   const invalidate = useThree((s) => s.invalidate);
 
   useEffect(() => {
     let alive = true;
     useSim.setState({ loading: true, error: null });
+    // Cada simulación nueva empieza una grabación nueva.
+    useRecord.getState().clear();
+    lastAngle.current.clear();
     void import("../physics/world")
       .then(async (m) => {
         await m.initPhysics();
@@ -65,6 +72,34 @@ export function PhysicsRunner() {
     simPoses.map = s.poses();
     simPoses.ext = s.extensions();
     since.current += dt;
+    sinceRec.current += dt;
+    // Grabación para Análisis: 10 muestras por segundo.
+    if (sinceRec.current >= 0.1) {
+      sinceRec.current = 0;
+      const ps = useProject.getState();
+      const status = useSim.getState().status;
+      const values: Record<string, number> = {};
+      for (const p of ps.project.parts) {
+        const r = ps.circuit.readings[p.id];
+        if (r) { values[`${p.id}:v`] = r.v; values[`${p.id}:i`] = r.i; }
+        const m = status?.motors[p.id];
+        const w = m && m.rpm !== 0 ? m.rpm : ps.mech.rpm[p.id];
+        if (w !== undefined && (m || Math.abs(w) > 0 || p.type === "dcmotor" || p.type.startsWith("gear") || p.type.startsWith("pulley"))) values[`${p.id}:rpm`] = w;
+        if (m && p.type === "dcmotor") { values[`${p.id}:torque`] = m.torque; values[`${p.id}:i`] = m.current; }
+        if (m?.angle !== undefined) values[`${p.id}:angle`] = m.angle;
+      }
+      for (const [jid, a] of Object.entries(status?.jointAngle ?? {})) values[`j${jid}:angle`] = a;
+      for (const [k, a] of Object.entries(values)) {
+        if (!k.endsWith(":angle")) continue;
+        const prev = lastAngle.current.get(k);
+        let u = a;
+        if (prev !== undefined) while (u - prev > 180) u -= 360;
+        if (prev !== undefined) while (u - prev < -180) u += 360;
+        values[k] = u;
+        lastAngle.current.set(k, u);
+      }
+      useRecord.getState().push(s.t, values);
+    }
     if (since.current > 0.25) {
       const status = s.status(volt, since.current);
       useSim.getState().setStatus(status);

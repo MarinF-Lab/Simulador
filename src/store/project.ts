@@ -6,9 +6,10 @@ import { detachFrom, endPos, posKey, reattach, termWorld } from "../core/model/t
 import { snapRotor } from "../core/mechanical/snap";
 import { isRotor } from "../core/mechanical/axes";
 import { solveTrain, type Train } from "../core/mechanical/train";
-import { alignedPairs, holesOf, restHeight, snapHoles, type HoleRef } from "../core/model/holes";
+import { alignedPairs, restHeight, snapHoles, type HoleRef } from "../core/model/holes";
 import { checkStructure, type StructureCheck } from "../core/model/structure";
 import type { Joint } from "../core/model/project";
+import { demoProject, wire } from "../core/persistence/examples";
 
 /** Junta que se ofrece al soltar una pieza con un agujero alineado. */
 export interface JointOffer {
@@ -123,71 +124,11 @@ interface ProjectState {
   straighten: (id: number) => void;
   undo: () => void;
   redo: () => void;
+  /** Reemplaza la mesa por otro proyecto (ejemplo, archivo o guardado). No se puede deshacer. */
+  load: (project: Project) => void;
 }
 
 const isCable = (p: Project, id: number) => p.cables.some((c) => c.id === id);
-
-function wire(id: number, a: Part, ta: number, b: Part, tb: number): Cable {
-  const [x0, y0, z0] = termWorld(a, ta), [x1, y1, z1] = termWorld(b, tb);
-  return { id, ends: [{ att: { part: a.id, t: ta }, x: x0, y: y0, z: z0 }, { att: { part: b.id, t: tb }, x: x1, y: y1, z: z1 }] };
-}
-
-/** Ejemplo inicial: el circuito de la ampolleta y un tren de engranajes. */
-/** Corre la pieza para que su agujero h quede justo en el punto p. */
-function onHole(part: Part, h: number, p: Vec3): Part {
-  const hole = holesOf(part)[h]!;
-  return { ...part, x: part.x + p[0] - hole.p[0], y: part.y + p[1] - hole.p[1], z: part.z + p[2] - hole.p[2] };
-}
-
-function sample(): Project {
-  const P = (id: number, type: string, x: number, y: number, rz = 0, props: Part["props"] = {}, z = 0): Part => ({ id, type, x, y, z, rot: [0, 0, rz], props });
-  const bat = P(1, "source", -220, 40, 0, { v: 9 });
-  const sw = P(2, "switch", -90, 130);
-  const res = P(3, "resistor", 30, 130, 0, { r: 100 });
-  const lamp = P(4, "lamp", 60, 10, 0, { vn: 6 });
-  // Motor de pie sobre una placa: en su eje, un engranaje de 10 que mueve uno de 40 y un brazo
-  // de dos tramos (eslabón y perfil) unidos por juntas rotacionales.
-  const plate = P(13, "plate", 200, -40, 0, { lx: 200, ly: 160 });
-  const motor: Part = { id: 14, type: "dcmotor", x: 180, y: -40, z: 6, rot: [0, 3, 0], props: { rpm: 30, torque: 0.8, vnom: 12 } };
-  const g10: Part = { id: 15, type: "gear10", x: 180, y: -40, z: 57, rot: [0, 0, 0], props: {} };
-  const axle: Part = { id: 16, type: "shaft", x: 230, y: -40, z: 6, rot: [0, 3, 0], props: { lx: 60 } };
-  const g40: Part = { id: 17, type: "gear40", x: 230, y: -40, z: 57, rot: [0, 0, 0], props: {} };
-  const link: Part = { id: 18, type: "link", x: 203, y: -40, z: 66, rot: [0, 0, 0], props: { lx: 60 } };
-  const arm: Part = { id: 19, type: "profile60", x: 251, y: -40, z: 72, rot: [0, 0, 0], props: {} };
-  const bat2 = P(20, "source", 70, -120, 0, { v: 12 });
-  const parts: Part[] = [bat, sw, res, lamp, P(8, "profile240", -60, -80), plate, motor, g10, axle, g40, link, arm, bat2];
-  const cables = [wire(9, bat, 1, sw, 0), wire(10, sw, 1, res, 0), wire(11, res, 1, lamp, 1), wire(12, lamp, 0, bat, 0),
-    wire(21, bat2, 1, motor, 1), wire(22, motor, 0, bat2, 0)];
-  // Brazo robótico de 3 servos alimentado con 6 V: la base gira 180° sobre la placa, y una
-  // escuadra lleva el hombro y el codo de lado, para que el brazo suba y baje.
-  const plate2 = P(30, "plate", -200, -200, 0, { lx: 160, ly: 120 });
-  const servo1: Part = { id: 31, type: "servo", x: -220, y: -190, z: 6, rot: [0, 0, 0], props: { target: 45, speed: 60, torque: 0.8 } };
-  const side: Vec3 = [1, 0, 0]; // de lado: el brazo del servo mira hacia −Y y el ángulo positivo sube
-  const bracket = onHole({ id: 43, type: "bracket", x: 0, y: 0, z: 0, rot: [0, 0, 0], props: {} }, 3, holesOf(servo1)[2]!.p);
-  const servo2 = onHole({ id: 33, type: "servo", x: 0, y: 0, z: 0, rot: side, props: { target: 40, speed: 60, torque: 0.8 } }, 0, holesOf(bracket)[6]!.p);
-  const link1 = onHole({ id: 32, type: "link", x: 0, y: 0, z: 0, rot: side, props: { lx: 90 } }, 1, holesOf(servo2)[2]!.p);
-  const servo3 = onHole({ id: 44, type: "servo", x: 0, y: 0, z: 0, rot: side, props: { target: -60, speed: 60, torque: 0.8 } }, 0, holesOf(link1)[2]!.p);
-  const link2 = onHole({ id: 34, type: "link", x: 0, y: 0, z: 0, rot: side, props: { lx: 80 } }, 1, holesOf(servo3)[2]!.p);
-  const bat3 = P(35, "source", -330, -110, 0, { v: 6 });
-  parts.push(plate2, servo1, bracket, servo2, link1, servo3, link2, bat3);
-  cables.push(wire(36, bat3, 1, servo1, 1), wire(37, bat3, 0, servo1, 0), wire(38, servo1, 1, servo2, 1), wire(39, servo1, 0, servo2, 0),
-    wire(45, servo2, 1, servo3, 1), wire(46, servo2, 0, servo3, 0));
-  const base: Project = { parts, cables, belts: [], nextId: 47 };
-  // Juntas: el eslabón en el eje del motor y el perfil sobre el otro extremo del eslabón.
-  const onShaft = alignedPairs(base, 18).find((q) => q.shaft);
-  const elbow = alignedPairs(base, 19).find((q) => q.b.part === 18);
-  const joints: Joint[] = [];
-  if (onShaft) joints.push({ id: 23, kind: "revolute", a: onShaft.a, b: onShaft.b });
-  if (elbow) joints.push({ id: 24, kind: "revolute", a: elbow.a, b: elbow.b });
-  joints.push(
-    { id: 40, kind: "revolute", a: { part: 43, h: 3 }, b: { part: 31, h: 2 } }, // base: la escuadra gira sobre el servo 1
-    { id: 41, kind: "fixed", a: { part: 33, h: 0 }, b: { part: 43, h: 6 } }, // servo 2 atornillado de lado a la escuadra
-    { id: 42, kind: "revolute", a: { part: 32, h: 1 }, b: { part: 33, h: 2 } }, // hombro: eslabón 1 en el servo 2
-    { id: 47, kind: "fixed", a: { part: 44, h: 0 }, b: { part: 32, h: 2 } }, // servo 3 atornillado al final del eslabón 1
-    { id: 48, kind: "revolute", a: { part: 34, h: 1 }, b: { part: 44, h: 2 } }, // codo: eslabón 2 en el servo 3
-  );
-  return { ...base, joints, nextId: 49 };
-}
 
 export const useProject = create<ProjectState>((set, get) => {
   const commit = (c: Command | null) => {
@@ -199,7 +140,7 @@ export const useProject = create<ProjectState>((set, get) => {
   const part = (id: number) => get().project.parts.find((p) => p.id === id);
   const cable = (id: number) => get().project.cables.find((c) => c.id === id);
   const setCables = (cables: Cable[]) => set({ project: { ...get().project, cables } });
-  const initial = sample();
+  const initial = demoProject();
   /** Tras soltar una pieza: si quedó un agujero alineado sin junta, se ofrece una. */
   const offerJoint = (id: number) => {
     const s = get();
@@ -233,6 +174,8 @@ export const useProject = create<ProjectState>((set, get) => {
       set({ jointOffer: null, selected: id });
     },
     dismissJoint: () => set({ jointOffer: null }),
+    load: (project) =>
+      set({ project, history: emptyHistory(), selected: null, dragging: null, dragFrom: null, pending: null, jointOffer: null, jointTool: null, beltMode: null, pressed: {} }),
     jointTap: (id, at) => {
       const s = get();
       const kind = s.jointTool;

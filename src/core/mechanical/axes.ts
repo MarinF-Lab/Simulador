@@ -55,6 +55,15 @@ export function rotorAxis(p: Part): Axis | null {
   return { id: p.id, c: centerOf(p), a, t, r: spec.r };
 }
 
+/** Punto donde una cuerda deja el tambor: el borde de abajo de la polea. */
+export function ropeDrop(A: Axis): V {
+  const down: V = [0, 0, -1];
+  const d = sub(down, mul(A.a, dot(A.a, down)));
+  const l = len(d);
+  const u: V = l < 1e-6 ? [1, 0, 0] : mul(d, 1 / l);
+  return add(A.c, mul(u, A.r + 1));
+}
+
 export function motorAxis(p: Part): Axis | null {
   const spec = MOTOR_SHAFT[p.type];
   if (!spec) return null;

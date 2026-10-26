@@ -68,7 +68,7 @@ export function PhysicsRunner() {
     const st = useProject.getState();
     const volt = (id: number) => useProject.getState().circuit.readings[id]?.v ?? 0;
     const props = (id: number) => st.project.parts.find((p) => p.id === id)?.props ?? {};
-    s.step(dt, { voltage: volt, props });
+    s.step(dt, { voltage: volt, props, rpm: (id) => st.mech.rpm[id] ?? 0 });
     simPoses.map = s.poses();
     simPoses.ext = s.extensions();
     since.current += dt;

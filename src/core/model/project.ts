@@ -37,12 +37,16 @@ export interface Cable {
   bend?: Vec3 | null;
 }
 
-/** Correa entre dos poleas. Cruzada invierte el sentido de giro. */
+/**
+ * Correa entre dos poleas. Cruzada invierte el sentido de giro.
+ * Con `rope`, es una cuerda: `a` es la polea tambor que la enrolla y `b` la pieza que cuelga.
+ */
 export interface Belt {
   id: number;
   a: number;
   b: number;
   cross: boolean;
+  rope?: boolean;
 }
 
 /** Junta entre dos agujeros alineados: rotacional (gira) o fija (perno). */
@@ -72,9 +76,9 @@ export const SIZES: Record<string, Vec3> = {
   dcmotor: [60, 30, 30], stepper: [42, 42, 50], servo: [40, 20, 40], linear: [120, 24, 24],
   shaft: [120, 8, 8], gear10: [24, 24, 8], gear20: [44, 44, 8], gear40: [84, 84, 8],
   pulleyS: [20, 20, 12], pulleyM: [36, 36, 12], pulleyL: [56, 56, 12], belt: [100, 40, 6],
-  bearing: [22, 22, 8], support: [40, 20, 40], link: [100, 14, 6], joint: [30, 20, 20],
+  bearing: [22, 22, 8], wheel: [60, 60, 14], piston: [110, 30, 66], support: [40, 20, 40], link: [100, 14, 6], joint: [30, 20, 20],
   profile60: [60, 10, 10], profile120: [120, 10, 10], profile240: [240, 10, 10],
-  plate: [160, 100, 6], bolt: [10, 10, 20], bracket: [60, 30, 40],
+  plate: [160, 100, 6], bolt: [10, 10, 20], rope: [100, 6, 6], weight: [30, 30, 30], bracket: [60, 30, 40],
   sensorAngle: [20, 20, 14], sensorContact: [20, 20, 14], meter: [40, 20, 50], text: [60, 4, 30],
 };
 

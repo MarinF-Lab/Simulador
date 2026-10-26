@@ -40,7 +40,7 @@ export function beltValid(A: Axis, B: Axis, cross: boolean): boolean {
 
 export function solveTrain(project: Project, motorRpm: Record<number, number>): Train {
   const parts = project.parts;
-  const belts: Belt[] = project.belts ?? [];
+  const belts: Belt[] = (project.belts ?? []).filter((b) => !b.rope);
   const rotors = parts.map(rotorAxis).filter((x): x is Axis => x !== null);
   const motors = parts.map(motorAxis).filter((x): x is Axis => x !== null);
   const byId = new Map(parts.map((p) => [p.id, p]));

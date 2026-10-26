@@ -113,6 +113,68 @@ function gearBeltExample(): Project {
   return { parts, cables, belts: [{ id: 14, a: 6, b: 8, cross: false }], joints: [], nextId: 15 };
 }
 
+/** Auto con tracción: chasis suelto, 4 motores DC con ruedas, pila e interruptor. */
+function carExample(): Project {
+  // La placa va a 9 mm del piso: así el eje de los motores queda a 30 mm, el radio de la rueda.
+  const plate: Part = { id: 1, type: "plate", x: -300, y: 0, z: 9, rot: [0, 0, 0], props: { lx: 200, ly: 140, anchored: false } };
+  const top = 15;
+  const motor = (id: number, x: number, left: boolean): Part =>
+    ({ id, type: "dcmotor", x, y: left ? 40 : -40, z: top, rot: [0, 0, left ? 1 : 3], props: { rpm: 60, torque: 0.4, vnom: 6 } });
+  const ml1 = motor(2, -360, true), ml2 = motor(3, -240, true), mr1 = motor(4, -360, false), mr2 = motor(5, -240, false);
+  const motors = [ml1, ml2, mr1, mr2];
+  // Cada rueda va en la punta del eje de su motor, con su cara de adentro mirando al motor.
+  const shaftOf = (m: Part) => holesOf(m).findIndex((h) => h.shaft);
+  const wheels = motors.map((m, i) =>
+    onHole({ id: 6 + i, type: "wheel", x: 0, y: 0, z: 0, rot: [m.y > 0 ? 3 : 1, 0, 0], props: {} }, 1, holesOf(m)[shaftOf(m)]!.p));
+  const bat: Part = { id: 10, type: "source", x: -300, y: -5, z: top, rot: [0, 0, 0], props: { v: 6 } };
+  const sw: Part = { id: 11, type: "switch", x: -300, y: 40, z: top, rot: [0, 0, 0], props: {} };
+  // Los motores de la derecha miran al otro lado: van con la polaridad invertida para empujar igual.
+  const cables = [
+    wire(12, bat, 1, sw, 0),
+    wire(13, sw, 1, ml1, 1), wire(14, ml1, 1, ml2, 1), wire(15, sw, 1, mr1, 0), wire(16, mr1, 0, mr2, 0),
+    wire(17, bat, 0, ml1, 0), wire(18, ml1, 0, ml2, 0), wire(19, bat, 0, mr1, 1), wire(20, mr1, 1, mr2, 1),
+  ];
+  const joints: Joint[] = motors.map((m, i) => ({ id: 21 + i, kind: "revolute", a: { part: wheels[i]!.id, h: 1 }, b: { part: m.id, h: shaftOf(m) } }));
+  return { parts: [plate, ...motors, ...wheels, bat, sw], cables, belts: [], joints, nextId: 25 };
+}
+
+/** Biela, manivela y pistón: el motor gira la manivela y la biela mueve el émbolo de ida y vuelta. */
+function crankExample(): Project {
+  const plate: Part = { id: 1, type: "plate", x: 0, y: 0, z: 0, rot: [0, 0, 0], props: { lx: 280, ly: 120 } };
+  // Motor de pie: la manivela (eslabón corto) va en la punta de su eje.
+  const motor: Part = { id: 2, type: "dcmotor", x: -90, y: 0, z: 6, rot: [0, 3, 0], props: { rpm: 30, torque: 0.8, vnom: 6 } };
+  const shaft = holesOf(motor).findIndex((h) => h.shaft);
+  const crank = onHole({ id: 3, type: "link", x: 0, y: 0, z: 0, rot: [0, 0, 0], props: { lx: 40 } }, 1, holesOf(motor)[shaft]!.p);
+  // La biela va sobre la manivela; su otra punta, sobre el perno del pistón.
+  const rod = onHole({ id: 4, type: "link", x: 0, y: 0, z: 0, rot: [0, 0, 0], props: { lx: 100 } }, 1, holesOf(crank)[2]!.p);
+  const piston = onHole({ id: 5, type: "piston", x: 0, y: 0, z: 0, rot: [0, 0, 0], props: {} }, 0, holesOf(rod)[3]!.p);
+  const bat: Part = { id: 6, type: "source", x: -60, y: 120, z: 0, rot: [0, 0, 0], props: { v: 6 } };
+  const sw: Part = { id: 7, type: "switch", x: 60, y: 120, z: 0, rot: [0, 0, 0], props: {} };
+  const cables = [wire(8, bat, 1, sw, 0), wire(9, sw, 1, motor, 1), wire(10, motor, 0, bat, 0)];
+  const joints: Joint[] = [
+    { id: 11, kind: "revolute", a: { part: 3, h: 1 }, b: { part: 2, h: shaft } }, // manivela en el eje del motor
+    { id: 12, kind: "revolute", a: { part: 4, h: 1 }, b: { part: 3, h: 2 } }, // biela en la punta de la manivela
+    { id: 13, kind: "revolute", a: { part: 4, h: 3 }, b: { part: 5, h: 0 } }, // biela en el perno del émbolo
+  ];
+  return { parts: [plate, motor, crank, rod, piston, bat, sw], cables, belts: [], joints, nextId: 14 };
+}
+
+/** Grúa: un motor arriba de un pórtico enrolla una cuerda en su polea y levanta una pesa. */
+function craneExample(): Project {
+  const base: Part = { id: 1, type: "plate", x: 0, y: 0, z: 0, rot: [0, 0, 0], props: { lx: 120, ly: 140 } };
+  // Dos columnas de perfil sostienen la placa de arriba, fija a 126 mm de la mesa.
+  const post = (id: number, y: number): Part => ({ id, type: "profile120", x: 40, y, z: 6, rot: [0, 1, 0], props: {} });
+  const top: Part = { id: 4, type: "plate", x: 40, y: 0, z: 126, rot: [0, 0, 0], props: { lx: 120, ly: 120 } };
+  // El motor queda acostado con el eje hacia afuera; la polea tambor va en la punta del eje.
+  const motor: Part = { id: 5, type: "dcmotor", x: 80, y: 0, z: 132, rot: [0, 0, 0], props: { rpm: 20, torque: 0.8, vnom: 6 } };
+  const drum: Part = { id: 6, type: "pulleyM", x: 105, y: 0, z: 129, rot: [0, 1, 0], props: {} };
+  const load: Part = { id: 7, type: "weight", x: 105, y: 0, z: 0, rot: [0, 0, 0], props: {} };
+  const bat: Part = { id: 8, type: "source", x: -10, y: -30, z: 6, rot: [0, 0, 0], props: { v: 6 } };
+  const sw: Part = { id: 9, type: "switch", x: -10, y: 30, z: 6, rot: [0, 0, 0], props: {} };
+  const cables = [wire(10, bat, 1, sw, 0), wire(11, sw, 1, motor, 1), wire(12, motor, 0, bat, 0)];
+  return { parts: [base, post(2, -50), post(3, 50), top, motor, drum, load, bat, sw], cables, belts: [{ id: 13, a: 6, b: 7, cross: false, rope: true }], joints: [], nextId: 14 };
+}
+
 export interface Example {
   id: string;
   name: string;
@@ -123,5 +185,8 @@ export interface Example {
 export const EXAMPLES: Example[] = [
   { id: "arm", name: "Brazo robótico", desc: "Tres servos: la base gira 180° y el hombro y el codo suben y bajan. Muévelos con los deslizadores θ.", build: armExample },
   { id: "bulb", name: "Circuito de la ampolleta", desc: "Pila de 9 V, interruptor, resistencia de 100 Ω y ampolleta de 6 V. Abre y cierra el interruptor.", build: bulbExample },
+  { id: "car", name: "Auto con tracción", desc: "Un chasis con 4 motores DC y ruedas. Al iniciar, los motores giran y el auto avanza por la mesa.", build: carExample },
+  { id: "crane", name: "Grúa con polea y cuerda", desc: "Un motor arriba del pórtico enrolla la cuerda en su polea y levanta la pesa. Invierte su polaridad para bajarla.", build: craneExample },
+  { id: "crank", name: "Biela, manivela y pistón", desc: "El motor gira la manivela y la biela convierte ese giro en el vaivén del émbolo dentro del cilindro.", build: crankExample },
   { id: "gears", name: "Tren 10 → 40 con correa", desc: "El motor mueve un engranaje de 10 dientes, que mueve uno de 40, y una correa pasa el giro a otra polea.", build: gearBeltExample },
 ];

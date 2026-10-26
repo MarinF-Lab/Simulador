@@ -9,7 +9,7 @@ import { BendHandle, CableEnds, Cables, FlowTicker, Terminals } from "./Electric
 import { brightness } from "../core/electrical/analyze";
 import { ROTORS } from "../core/mechanical/axes";
 import { useUI } from "../store/ui";
-import { Belts } from "./Mechanical";
+import { Belts, Ropes } from "./Mechanical";
 import { Joints } from "./Structure";
 import { PhysicsRunner } from "./Physics";
 import { simPoses, useSim } from "../store/sim";
@@ -125,7 +125,7 @@ function useSimPose(ref: RefObject<THREE.Group | null>, part: Part, center: [num
 function useRod(ref: RefObject<THREE.Group | null>, part: Part) {
   const rod = useRef<THREE.Object3D | null>(null);
   useFrame(() => {
-    if (part.type !== "linear" || !ref.current) return;
+    if ((part.type !== "linear" && part.type !== "piston") || !ref.current) return;
     rod.current ??= ref.current.getObjectByName("rod") ?? null;
     if (rod.current) rod.current.position.x = simPoses.ext.get(part.id) ?? 0;
   });
@@ -201,6 +201,7 @@ export function Scene() {
       <CableEnds />
       <BendHandle />
       <Belts />
+      <Ropes />
       {!running && <Joints />}
       {running && <PhysicsRunner />}
       <FlowTicker />

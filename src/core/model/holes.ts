@@ -62,10 +62,19 @@ function localHoles(part: Pick<Part, "type" | "props">): LocalHole[] {
         ]),
       ];
       break;
+    // Pistón: el perno del émbolo, arriba. Al simular, el émbolo se desliza a lo largo del cilindro.
+    case "piston":
+      out = [{ p: [25, 0, h / 2], n: [0, 0, 1] }];
+      break;
+    // Pesa: un gancho arriba para colgarla de una cuerda o unirla.
+    case "weight":
+      out = [{ p: [0, 0, h / 2], n: [0, 0, 1] }];
+      break;
     case "link":
       out = through([[-(lx / 2 - 7), 0], [lx / 2 - 7, 0]], h);
       break;
     case "bearing":
+    case "wheel":
       out = through([[0, 0]], h);
       break;
     case "support":

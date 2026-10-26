@@ -69,7 +69,11 @@ export function Workspace() {
     : selJoint
     ? selJoint.kind === "revolute" ? "Junta rotacional: las piezas giran sobre este agujero al simular." : "Unión fija: las piezas quedan unidas como con un perno."
     : beltMode
-    ? beltMode.first === null
+    ? beltMode.rope
+      ? beltMode.first === null
+        ? "Toca la polea tambor que enrollará la cuerda. Toca el fondo para cancelar."
+        : "Ahora toca la pieza que colgará de la cuerda."
+      : beltMode.first === null
       ? "Toca la primera polea que unirá la correa. Toca el fondo para cancelar."
       : "Ahora toca la segunda polea. Deben quedar paralelas y en el mismo plano."
     : pending

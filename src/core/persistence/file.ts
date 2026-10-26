@@ -40,7 +40,7 @@ function cable(v: unknown, alive: Set<number>): Cable | null {
 
 function belt(v: unknown, alive: Set<number>): Belt | null {
   if (!isObj(v) || !isId(v.id) || !isId(v.a) || !isId(v.b) || !alive.has(v.a) || !alive.has(v.b)) return null;
-  return { id: v.id, a: v.a, b: v.b, cross: v.cross === true };
+  return v.rope === true ? { id: v.id, a: v.a, b: v.b, cross: false, rope: true } : { id: v.id, a: v.a, b: v.b, cross: v.cross === true };
 }
 
 function joint(v: unknown, alive: Set<number>): Joint | null {

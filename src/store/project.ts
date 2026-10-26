@@ -73,7 +73,7 @@ interface ProjectState {
   jointTap: (id: number, at: Vec3) => void;
   setJointKind: (id: number, kind: Joint["kind"]) => void;
   /** Poniendo una correa: null = no; first = primera polea tocada. */
-  beltMode: { first: number | null } | null;
+  beltMode: { first: number | null; rope?: boolean } | null;
   /** Posición de la pieza al empezar a arrastrarla (para deshacer). */
   dragFrom: Pick<Part, "x" | "y" | "z" | "rot"> | null;
   /** Toque en una pieza mientras se pone una correa. */
@@ -197,9 +197,18 @@ export const useProject = create<ProjectState>((set, get) => {
       const s = get();
       const bm = s.beltMode;
       const p = part(id);
-      if (!bm || !p || !p.type.startsWith("pulley")) return;
-      if (bm.first === null) { set({ beltMode: { first: id }, selected: id }); return; }
+      if (!bm || !p) return;
+      // La cuerda va de una polea tambor a cualquier pieza que no gire con el tren.
+      if (bm.first === null) { if (p.type.startsWith("pulley")) set({ beltMode: { ...bm, first: id }, selected: id }); return; }
       if (bm.first === id) return;
+      if (bm.rope) {
+        if (isRotor(p.type)) return;
+        const rid = s.project.nextId;
+        commit({ kind: "addBelt", belt: { id: rid, a: bm.first, b: id, cross: false, rope: true } });
+        set({ beltMode: null, selected: rid });
+        return;
+      }
+      if (!p.type.startsWith("pulley")) return;
       const belts = s.project.belts ?? [];
       const exists = belts.some((b) => (b.a === bm.first && b.b === id) || (b.a === id && b.b === bm.first));
       const bid = s.project.nextId;
@@ -216,8 +225,8 @@ export const useProject = create<ProjectState>((set, get) => {
 
     addNear: (type, x, y) => {
       const s = get();
-      if (type === "belt") {
-        set({ beltMode: { first: null }, selected: null, pending: null, jointTool: null });
+      if (type === "belt" || type === "rope") {
+        set({ beltMode: { first: null, rope: type === "rope" }, selected: null, pending: null, jointTool: null });
         return -1;
       }
       if (type === "bolt" || type === "joint") {

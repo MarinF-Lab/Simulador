@@ -118,6 +118,34 @@ const SHAPES: Record<PartKind, ReactNode> = {
       ))}
     </>
   ),
+  wheel: (
+    <>
+      <circle cx="20" cy="20" r="14" className="fill-muted/15" strokeWidth="4" />
+      <circle cx="20" cy="20" r="6" />
+      <circle cx="20" cy="20" r="1.8" className="fill-current" stroke="none" />
+    </>
+  ),
+  piston: (
+    <>
+      <path d="M4 14h32v12H4z" className="fill-muted/15" />
+      <rect x="20" y="16" width="8" height="8" className="fill-accent/30" />
+      <path d="M24 20l-12-12" />
+      <circle cx="12" cy="8" r="2" />
+    </>
+  ),
+  rope: (
+    <>
+      <circle cx="20" cy="9" r="6" className="fill-muted/15" />
+      <path d="M14 9v18" />
+      <path d="M10 27h8v7h-8z" className="fill-accent/30" />
+    </>
+  ),
+  weight: (
+    <>
+      <path d="M10 16h20l4 18H6z" className="fill-muted/15" />
+      <circle cx="20" cy="10" r="4" />
+    </>
+  ),
   support: (
     <>
       <path d="M6 34h28M12 34V18a8 8 0 0 1 16 0v16" className="fill-muted/15" />

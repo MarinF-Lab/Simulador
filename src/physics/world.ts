@@ -9,7 +9,7 @@ import RAPIER from "@dimforge/rapier3d-compat";
 import { holeAt } from "../core/model/holes";
 import type { Joint } from "../core/model/project";
 import { extent, rotateLocal, sizeOf, type Part, type Project, type Vec3 } from "../core/model/project";
-import { ROTORS } from "../core/mechanical/axes";
+import { ROTORS, ropeDrop, rotorAxis } from "../core/mechanical/axes";
 import { checkStructure } from "../core/model/structure";
 import { motorCurrent, motorParams, motorTorque, noLoadSpeed, type MotorParams } from "../core/coupling/dcmotor";
 import type { Issue } from "../core/electrical/circuit";
@@ -25,6 +25,7 @@ export const initPhysics = (): Promise<void> => (ready ??= RAPIER.init());
 function density(type: string): number {
   if (type.startsWith("profile") || type === "link" || type === "plate" || type === "bracket") return 900;
   if (type === "dcmotor" || type === "stepper" || type === "servo") return 2500;
+  if (type === "weight") return 7800;
   return 1200;
 }
 
@@ -60,6 +61,21 @@ export interface SimStatus {
 export interface SimEnv {
   voltage: (id: number) => number;
   props: (id: number) => Record<string, unknown>;
+  /** RPM de cada polea según el tren (para enrollar las cuerdas). */
+  rpm?: (id: number) => number;
+}
+
+/** Cuerda de un tambor a una carga: su largo cambia con el giro del tambor. */
+interface Rope {
+  drum: number;
+  r: number;
+  load: RAPIER.RigidBody;
+  /** Puntas de la unión: en la mesa (fija) y en la carga. */
+  a: RAPIER.Vector3;
+  b: RAPIER.Vector3;
+  L0: number;
+  L: number;
+  joint: RAPIER.ImpulseJoint;
 }
 
 type DriveKind = "dc" | "servo" | "stepper" | "linear";
@@ -119,6 +135,10 @@ export class Sim {
   private bodies = new Map<number, RAPIER.RigidBody>();
   private start = new Map<number, Vec3>();
   private drives: Drive[] = [];
+  /** Émbolo de cada pistón: un cuerpo propio que se desliza en el cilindro. */
+  private sliders = new Map<number, { body: RAPIER.RigidBody; axis: Vec3 }>();
+  private ropes: Rope[] = [];
+  private table!: RAPIER.RigidBody;
   private acc = 0;
   private fallen = new Set<number>();
   private revs: { id: number; A: RAPIER.RigidBody; B: RAPIER.RigidBody; axis: Vec3 }[] = [];
@@ -136,6 +156,7 @@ export class Sim {
     this.world.integrationParameters.lengthUnit = 0.01;
     // Mesa
     const table = this.world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(0, 0, -0.01));
+    this.table = table;
     this.world.createCollider(RAPIER.ColliderDesc.cuboid(0.6, 0.4, 0.01).setFriction(0.8), table);
 
     // Brazos con servos: lo que cuelga de un servo (por su brazo y por uniones fijas) se mueve
@@ -181,23 +202,65 @@ export class Sim {
       if (ROTORS[part.type]) continue;
       const ez = extent(part)[2];
       const c: Vec3 = [part.x, part.y, part.z + ez / 2];
-      const fixed = part.type === "plate"; // la placa base queda anclada a la mesa
+      // La placa base queda anclada a la mesa, salvo que se suelte para usarla como chasis.
+      const fixed = part.type === "plate" && part.props.anchored !== false;
       const base = fixed ? RAPIER.RigidBodyDesc.fixed() : kin.has(part.id) ? RAPIER.RigidBodyDesc.kinematicPositionBased() : RAPIER.RigidBodyDesc.dynamic();
       const desc = base.setTranslation(c[0] * S, c[1] * S, c[2] * S);
       const body = this.world.createRigidBody(desc);
       const [sx, sy, sz] = sizeOf(part.type, part.props);
       const q = partQuat(part.rot);
+      // La rueda es un cilindro de goma; Rapier lo hace a lo largo de Y y la pieza lo tiene en Z.
+      const wheel = part.type === "wheel";
+      // El cilindro del pistón llega 6 mm por debajo del perno: la biela pasa por encima sin rozarlo.
+      const lower = part.type === "piston" ? 3 : 0;
+      const shape = wheel ? RAPIER.ColliderDesc.cylinder((sz / 2) * S, (sx / 2) * S) : RAPIER.ColliderDesc.cuboid((sx / 2) * S, (sy / 2) * S, (sz / 2 - lower) * S);
+      if (lower) {
+        const off = rotateLocal([0, 0, -lower], part.rot);
+        shape.setTranslation(off[0] * S, off[1] * S, off[2] * S);
+      }
+      const qr = wheel ? qmul(q, [Math.SQRT1_2, 0, 0, Math.SQRT1_2]) : q;
       const col = this.world.createCollider(
-        RAPIER.ColliderDesc.cuboid((sx / 2) * S, (sy / 2) * S, (sz / 2) * S)
-          .setRotation({ x: q[0], y: q[1], z: q[2], w: q[3] })
+        shape
+          .setRotation({ x: qr[0], y: qr[1], z: qr[2], w: qr[3] })
           .setDensity(density(part.type))
-          .setFriction(0.7),
+          .setFriction(wheel ? 1.2 : 0.7),
         body,
       );
       this.partOf.set(col.handle, part.id);
       if (part.type === "sensorContact") this.sensors.push({ id: part.id, collider: col, ignore: new Set() });
       this.bodies.set(part.id, body);
       this.start.set(part.id, c);
+    }
+
+    // Émbolos: un cuerpo que se desliza a lo largo del cilindro, desde el perno hacia atrás.
+    for (const part of project.parts.filter((p) => p.type === "piston")) {
+      const H = this.bodies.get(part.id);
+      if (!H) continue;
+      const c = this.start.get(part.id)!;
+      const body = this.world.createRigidBody(RAPIER.RigidBodyDesc.dynamic().setTranslation(c[0] * S, c[1] * S, c[2] * S));
+      const q = partQuat(part.rot), off = rotateLocal([25, 0, 19], part.rot);
+      this.world.createCollider(
+        RAPIER.ColliderDesc.cuboid(12 * S, 11 * S, 14 * S).setTranslation(off[0] * S, off[1] * S, off[2] * S)
+          .setRotation({ x: q[0], y: q[1], z: q[2], w: q[3] }).setDensity(1200).setFriction(0.3),
+        body,
+      );
+      const axis = rotateLocal([1, 0, 0], part.rot);
+      const j = this.world.createImpulseJoint(RAPIER.JointData.prismatic({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 0 }, { x: axis[0], y: axis[1], z: axis[2] }), H, body, true) as RAPIER.PrismaticImpulseJoint;
+      j.setLimits(-60 * S, 5 * S);
+      j.setContactsEnabled(false);
+      this.sliders.set(part.id, { body, axis });
+    }
+
+    // Cuerdas: van del borde del tambor (un punto fijo) al gancho de la carga, tirantes al empezar.
+    for (const b of (project.belts ?? []).filter((x) => x.rope)) {
+      const drum = project.parts.find((p) => p.id === b.a), load = this.bodies.get(b.b), lp = project.parts.find((p) => p.id === b.b);
+      const ax = drum && rotorAxis(drum);
+      if (!ax || !load || !lp) continue;
+      const drop = ropeDrop(ax), c = this.start.get(b.b)!, top: Vec3 = [c[0], c[1], c[2] + extent(lp)[2] / 2];
+      const L0 = Math.hypot(drop[0] - top[0], drop[1] - top[1], drop[2] - top[2]);
+      const a = { x: drop[0] * S, y: drop[1] * S, z: drop[2] * S + 0.01 }, bb = { x: 0, y: 0, z: (extent(lp)[2] / 2) * S };
+      const joint = this.world.createImpulseJoint(RAPIER.JointData.rope(L0 * S, a, bb), this.table, load, true);
+      this.ropes.push({ drum: b.a, r: ax.r, load, a, b: bb, L0, L: L0, joint });
     }
 
     // Lo que se apoya sobre la placa base queda unido a ella, como atornillado.
@@ -221,7 +284,8 @@ export class Sim {
     const kinJoint = new Set(edges.map((e) => e.joint));
     for (const j of project.joints ?? []) {
       if (broken.has(j.id) || kinJoint.has(j.id)) continue;
-      const A = this.bodies.get(j.a.part), B = this.bodies.get(j.b.part);
+      // Lo que se une a un pistón se une a su émbolo.
+      const A = this.sliders.get(j.a.part)?.body ?? this.bodies.get(j.a.part), B = this.sliders.get(j.b.part)?.body ?? this.bodies.get(j.b.part);
       const ha = holeAt(project, j.a), hb = holeAt(project, j.b);
       if (!A || !B || !ha || !hb) continue;
       const pa = this.start.get(j.a.part)!, pb = this.start.get(j.b.part)!;
@@ -282,10 +346,25 @@ export class Sim {
     while (this.acc >= STEP && n < 6) {
       for (const d of this.drives) this.drive(d, env);
       this.kinematics(env);
+      this.reel(env);
       this.world.step();
       this.acc -= STEP;
       this.t += STEP;
       n++;
+    }
+  }
+
+  /** Enrolla o suelta cada cuerda según el giro de su tambor. */
+  private reel(env: SimEnv): void {
+    for (const r of this.ropes) {
+      const w = ((env.rpm?.(r.drum) ?? 0) / 60) * 2 * Math.PI;
+      // Entre 8 mm (la carga llega al tambor) y 400 mm más que el largo de diseño.
+      const L = Math.min(r.L0 + 400, Math.max(8, r.L - w * r.r * STEP));
+      if (Math.abs(L - r.L) < 0.05) continue;
+      r.L = L;
+      // Rapier no cambia el largo de una cuerda: se reemplaza la unión.
+      this.world.removeImpulseJoint(r.joint, true);
+      r.joint = this.world.createImpulseJoint(RAPIER.JointData.rope(L * S, r.a, r.b), this.table, r.load, true);
     }
   }
 
@@ -371,6 +450,10 @@ export class Sim {
       const pm = this.bodies.get(d.motor)!.translation(), pd = this.bodies.get(d.driven)!.translation();
       const rel: Vec3 = [(pd.x - pm.x) / S - d.d0[0], (pd.y - pm.y) / S - d.d0[1], (pd.z - pm.z) / S - d.d0[2]];
       out.set(d.motor, rel[0] * d.axis[0] + rel[1] * d.axis[1] + rel[2] * d.axis[2]);
+    }
+    for (const [id, s] of this.sliders) {
+      const h = this.bodies.get(id)!.translation(), t = s.body.translation();
+      out.set(id, ((t.x - h.x) * s.axis[0] + (t.y - h.y) * s.axis[1] + (t.z - h.z) * s.axis[2]) / S);
     }
     return out;
   }

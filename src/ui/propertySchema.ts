@@ -103,8 +103,13 @@ export function sectionsFor(kind: PartKind): Section[] {
       return [{ id: "sensor", title: "Lectura", fields: [{ type: "reading", label: "Valor", value: "—" }] }];
     case "text":
       return [{ id: "text", title: "Texto", fields: [{ type: "text", key: "txt", label: "Contenido", def: "Nota" }] }];
-    case "profile":
     case "plate":
+      return [{ id: "plate", title: "Placa", fields: [{ type: "toggle", key: "anchored", label: "Fija a la mesa", def: true }] }];
+    case "wheel":
+    case "piston":
+    case "rope":
+    case "weight":
+    case "profile":
     case "bolt":
     case "bracket":
     case "bearing":

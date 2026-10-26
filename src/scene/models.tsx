@@ -287,6 +287,20 @@ function Model({ type, glow = 0, burned = false, on = true, size }: { type: stri
           <Box s={[10, 24, 24]} p={[-55, 0, 0]} m={M.dark} />
         </group>
       );
+    case "piston":
+      return (
+        <group>
+          <Box s={[70, 26, 36]} m={M.dark} />
+          <Box s={[110, 30, 4]} p={[0, 0, 36]} m={M.steel} />
+          <Box s={[110, 4, 26]} p={[0, -13, 40]} m={M.steel} />
+          <Box s={[110, 4, 26]} p={[0, 13, 40]} m={M.steel} />
+          {/* El émbolo se corre al simular (ver Part3D). */}
+          <group name="rod">
+            <Box s={[24, 22, 26]} p={[25, 0, 40]} m={M.white} />
+            <Cyl r={3} h={0.6} p={[25, 0, 65.8]} m={M.hole} seg={12} />
+          </group>
+        </group>
+      );
     case "shaft":
       return <Cyl r={4} h={size[0]} p={[0, 0, 4]} axis="x" m={M.steel} />;
     case "gear10":
@@ -309,6 +323,24 @@ function Model({ type, glow = 0, burned = false, on = true, size }: { type: stri
           <Cyl r={11} h={8} m={M.steel} />
           <Cyl r={7.5} h={8.4} p={[0, 0, -0.2]} m={M.dark} />
           <Cyl r={4} h={8.8} p={[0, 0, -0.4]} m={M.hole} seg={12} />
+        </group>
+      );
+    case "weight":
+      return (
+        <group>
+          <Box s={[30, 30, 26]} m={M.dark} />
+          <Box s={[22, 22, 2]} p={[0, 0, 26]} m={M.steel} />
+          <Cyl r={3} h={2.4} p={[0, 0, 27.8]} m={M.hole} seg={12} />
+        </group>
+      );
+    case "wheel":
+      return (
+        <group>
+          <Cyl r={30} h={14} m={M.rubber} />
+          <Cyl r={20} h={14.4} p={[0, 0, -0.2]} m={M.steel} />
+          <Box s={[36, 5, 14.8]} p={[0, 0, -0.4]} m={M.dark} />
+          <Box s={[5, 36, 14.8]} p={[0, 0, -0.4]} m={M.dark} />
+          <Cyl r={4} h={15.2} p={[0, 0, -0.6]} m={M.hole} seg={12} />
         </group>
       );
     case "support":

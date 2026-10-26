@@ -1,7 +1,10 @@
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
+import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { useProject } from "../store/project";
-import { cross, dot, len, mul, sub, type Axis, type V } from "../core/mechanical/axes";
+import { extent, type Part } from "../core/model/project";
+import { simPoses } from "../store/sim";
+import { cross, dot, len, mul, ropeDrop, sub, type Axis, type V } from "../core/mechanical/axes";
 
 // Correas 3D: tangentes entre las dos poleas en su plano, más el arco que abraza cada polea.
 
@@ -85,11 +88,56 @@ export function Belts() {
   const selected = useProject((s) => s.selected);
   return (
     <group name="belts">
-      {(belts ?? []).map((b) => {
+      {(belts ?? []).filter((b) => !b.rope).map((b) => {
         const A = mech.axisOf[b.a], B = mech.axisOf[b.b];
         if (!A || !B) return null;
         const color = selected === b.id ? C.sel : mech.beltOk[b.id] ? C.belt : C.warn;
         return <BeltMesh key={b.id} id={b.id} A={A} B={B} crossed={b.cross} color={color} />;
+      })}
+    </group>
+  );
+}
+
+const Y = new THREE.Vector3(0, 1, 0);
+const tmpA = new THREE.Vector3(), tmpB = new THREE.Vector3(), tmpD = new THREE.Vector3(), tmpQ = new THREE.Quaternion();
+
+/** Cuerda: un hilo del borde del tambor al gancho de la carga. Al simular sigue a la carga. */
+function RopeMesh({ id, drum, load, selected }: { id: number; drum: Axis; load: Part; selected: boolean }) {
+  const ref = useRef<THREE.Mesh>(null);
+  const top = extent(load)[2];
+  useFrame(() => {
+    const m = ref.current;
+    if (!m) return;
+    tmpA.set(...ropeDrop(drum));
+    const pose = simPoses.map.get(load.id);
+    if (pose) {
+      tmpB.set(0, 0, top / 2).applyQuaternion(tmpQ.set(...pose.q));
+      tmpB.x += pose.p[0]; tmpB.y += pose.p[1]; tmpB.z += pose.p[2];
+    } else tmpB.set(load.x, load.y, load.z + top);
+    const d = tmpD.copy(tmpB).sub(tmpA);
+    const L = Math.max(0.1, d.length());
+    m.position.copy(tmpA).addScaledVector(d, 0.5);
+    m.quaternion.setFromUnitVectors(Y, d.normalize());
+    m.scale.set(1, L, 1);
+  });
+  return (
+    <mesh ref={ref} castShadow userData={{ belt: id }}>
+      <cylinderGeometry args={[1.1, 1.1, 1, 8]} />
+      <meshStandardMaterial color={selected ? C.sel : "#c8a165"} roughness={0.9} emissive={selected ? C.sel : "#000"} emissiveIntensity={selected ? 0.4 : 0} />
+    </mesh>
+  );
+}
+
+export function Ropes() {
+  const belts = useProject((s) => s.project.belts);
+  const parts = useProject((s) => s.project.parts);
+  const axisOf = useProject((s) => s.mech.axisOf);
+  const selected = useProject((s) => s.selected);
+  return (
+    <group name="ropes">
+      {(belts ?? []).filter((b) => b.rope).map((b) => {
+        const drum = axisOf[b.a], load = parts.find((p) => p.id === b.b);
+        return drum && load ? <RopeMesh key={b.id} id={b.id} drum={drum} load={load} selected={selected === b.id} /> : null;
       })}
     </group>
   );

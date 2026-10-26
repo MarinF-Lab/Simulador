@@ -454,6 +454,32 @@ function BeltPanel({ id }: { id: number }) {
   if (!belt) return null;
   const A = mech.axisOf[belt.a], B = mech.axisOf[belt.b];
   const ratio = A && B ? A.r / B.r : 0;
+  if (belt.rope) {
+    const w = mech.rpm[belt.a] ?? 0;
+    const speed = A ? (w / 60) * 2 * Math.PI * A.r : 0;
+    return (
+      <>
+        <div className="flex items-center gap-3 rounded-xl border border-line bg-panel-2/60 p-3">
+          <PartIcon kind="rope" className="size-10 text-ink/85" />
+          <div className="min-w-0 flex-1">
+            <p className="font-semibold">Cuerda</p>
+            <p className="text-xs text-muted">De la polea n.º {belt.a} a la pieza n.º {belt.b}</p>
+          </div>
+          <button onClick={() => remove(id)} aria-label="Eliminar cuerda" className="grid size-11 place-items-center rounded-lg text-muted hover:bg-panel hover:text-err">
+            <Trash2 className="size-5" />
+          </button>
+        </div>
+        <WhatIsIt desc={findItem("rope")!.desc} />
+        <section className="rounded-xl border border-line px-3 py-2">
+          <h3 className="pb-2 text-xs font-semibold tracking-widest text-muted uppercase">Lecturas</h3>
+          <div className="grid grid-cols-2 gap-2 pb-1">
+            <Cell k="Tambor" v={fmtRpm(w)} />
+            <Cell k="Carga" v={speed > 0.5 ? `sube ${fmt(speed)} mm/s` : speed < -0.5 ? `baja ${fmt(-speed)} mm/s` : "quieta"} />
+          </div>
+        </section>
+      </>
+    );
+  }
   return (
     <>
       <div className="flex items-center gap-3 rounded-xl border border-line bg-panel-2/60 p-3">

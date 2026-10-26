@@ -6,7 +6,7 @@ export type CategoryId = "electrical" | "motors" | "mechanical" | "structures" |
 export type PartKind =
   | "source" | "resistor" | "lamp" | "led" | "switch" | "wire" | "hbridge"
   | "dcmotor" | "stepper" | "servo" | "linear"
-  | "shaft" | "gear" | "pulley" | "belt" | "bearing" | "support" | "link" | "joint"
+  | "shaft" | "gear" | "pulley" | "belt" | "bearing" | "wheel" | "piston" | "rope" | "weight" | "support" | "link" | "joint"
   | "profile" | "plate" | "bolt" | "bracket"
   | "sensor" | "meter" | "text";
 
@@ -54,7 +54,10 @@ export const CATALOG: CatalogItem[] = [
   { id: "pulleyL", name: "Polea", kind: "pulley", category: "mechanical", variant: "L", desc: "Polea grande. Movida por una chica con una correa, gira más lento." },
   { id: "belt", name: "Correa", kind: "belt", category: "mechanical", tags: ["liga", "banda"], desc: "Une dos poleas para que giren juntas. Elige Correa y toca dos poleas. La normal mantiene el sentido de giro; la cruzada lo invierte." },
   { id: "bearing", name: "Rodamiento", kind: "bearing", category: "mechanical", desc: "Sostiene un eje para que gire suave. Se apoya en una placa o un soporte, y el eje pasa por su centro." },
+  { id: "wheel", name: "Rueda", kind: "wheel", category: "mechanical", tags: ["llanta", "neumático", "neumatico", "auto"], desc: "Rueda de goma de 60 mm. Móntala en la punta del eje de un motor y gira con él; si toca el suelo, empuja lo que la lleva, como un auto." },
+  { id: "piston", name: "Pistón", kind: "piston", category: "mechanical", tags: ["cilindro", "émbolo", "embolo", "biela"], desc: "Cilindro con un émbolo que se desliza libre de punta a punta. Une el perno del émbolo a una biela: al girar la manivela, el émbolo va y viene." },
   { id: "support", name: "Soporte", kind: "support", category: "mechanical", desc: "Base con un agujero arriba para sostener un eje o una junta a cierta altura." },
+  { id: "rope", name: "Cuerda", kind: "rope", category: "mechanical", tags: ["hilo", "grúa", "grua", "cable de acero"], desc: "Cuelga una pieza de una polea tambor: elige Cuerda, toca la polea y luego la pieza. Al girar la polea la cuerda se enrolla y sube la carga; al revés, la baja." },
   { id: "link", name: "Eslabón", kind: "link", category: "mechanical", tags: ["biela", "brazo"], desc: "Barra con un agujero en cada extremo. Sirve para armar brazos y bielas: une sus agujeros con juntas rotacionales." },
   { id: "joint", name: "Junta rotacional", kind: "joint", category: "mechanical", tags: ["articulación", "bisagra"], desc: "Herramienta: une dos piezas por agujeros alineados para que puedan girar. Elige Junta rotacional y toca una de las piezas." },
 
@@ -67,6 +70,7 @@ export const CATALOG: CatalogItem[] = [
 
   { id: "sensorAngle", name: "Sensor", kind: "sensor", category: "other", variant: "de ángulo", tags: ["encoder"], desc: "Mide el ángulo de una junta o un eje. Móntalo en la junta y verás su ángulo en vivo al simular." },
   { id: "sensorContact", name: "Sensor", kind: "sensor", category: "other", variant: "de contacto", tags: ["final de carrera"], desc: "Pulsador: cierra el circuito mientras está presionado. Lo presionas con su botón o, al simular, cuando una pieza lo toca." },
+  { id: "weight", name: "Pesa", kind: "weight", category: "other", tags: ["carga", "peso"], desc: "Bloque de acero de 30 mm (unos 200 g) con un gancho arriba. Sirve como carga para una grúa o para probar la fuerza de un mecanismo." },
   { id: "meter", name: "Voltímetro", kind: "meter", category: "other", tags: ["medidor"], desc: "Voltímetro: mide el voltaje entre sus dos bornes sin afectar el circuito. Conéctalo a los extremos de lo que quieras medir." },
   { id: "text", name: "Texto", kind: "text", category: "other", tags: ["nota", "etiqueta"], desc: "Cartel para anotar algo en la mesa. Escribe el texto en Propiedades." },
 ];

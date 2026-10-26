@@ -165,3 +165,65 @@ describe("brazo de servos del ejemplo", () => {
     }
   });
 });
+
+describe("auto del ejemplo", () => {
+  it("avanza por la mesa con sus 4 ruedas", async () => {
+    const { EXAMPLES } = await import("../core/persistence/examples");
+    const { analyze } = await import("../core/electrical/analyze");
+    const project = EXAMPLES.find((e) => e.id === "car")!.build();
+    const c = analyze(project);
+    const sim = new Sim(project);
+    const props = (id: number) => project.parts.find((p) => p.id === id)?.props ?? {};
+    const volt = (id: number) => c.readings[id]?.v ?? 0;
+    for (const m of project.parts.filter((p) => p.type === "dcmotor")) expect(Math.abs(volt(m.id))).toBeGreaterThan(5);
+    run(sim, 2, volt, props);
+    const chassis = sim.poses().get(1)!.p;
+    expect(chassis[0] - -300).toBeGreaterThan(50);
+    expect(Math.abs(chassis[1])).toBeLessThan(30);
+    expect(chassis[2]).toBeGreaterThan(5);
+    sim.free();
+  });
+});
+
+describe("biela y pistón del ejemplo", () => {
+  it("el émbolo va y viene unas 2 veces el radio de la manivela", async () => {
+    const { EXAMPLES } = await import("../core/persistence/examples");
+    const { analyze } = await import("../core/electrical/analyze");
+    const project = EXAMPLES.find((e) => e.id === "crank")!.build();
+    const c = analyze(project);
+    const sim = new Sim(project);
+    const props = (id: number) => project.parts.find((p) => p.id === id)?.props ?? {};
+    const volt = (id: number) => c.readings[id]?.v ?? 0;
+    let lo = Infinity, hi = -Infinity;
+    for (let i = 0; i < 300; i++) {
+      sim.step(1 / 60, { voltage: volt, props });
+      const e = sim.extensions().get(5)!;
+      lo = Math.min(lo, e); hi = Math.max(hi, e);
+    }
+    // Manivela de 26 mm: el émbolo recorre 52 mm, desde el punto muerto de diseño hacia atrás.
+    expect(hi - lo).toBeGreaterThan(45);
+    expect(hi - lo).toBeLessThan(58);
+    expect(hi).toBeLessThan(3);
+    sim.free();
+  });
+});
+
+describe("grúa del ejemplo", () => {
+  it("la polea enrolla la cuerda y levanta la pesa", async () => {
+    const { EXAMPLES } = await import("../core/persistence/examples");
+    const { analyze } = await import("../core/electrical/analyze");
+    const { solveTrain } = await import("../core/mechanical/train");
+    const { motorSpeeds } = await import("../store/project");
+    const project = EXAMPLES.find((e) => e.id === "crane")!.build();
+    const c = analyze(project);
+    const rpm = solveTrain(project, motorSpeeds(project, c)).rpm;
+    expect(Math.abs(rpm[6] ?? 0)).toBeGreaterThan(15);
+    const sim = new Sim(project);
+    const props = (id: number) => project.parts.find((p) => p.id === id)?.props ?? {};
+    const env = { voltage: (id: number) => c.readings[id]?.v ?? 0, props, rpm: (id: number) => rpm[id] ?? 0 };
+    for (let i = 0; i < 120; i++) sim.step(1 / 60, env);
+    const z = sim.poses().get(7)!.p[2];
+    expect(z).toBeGreaterThan(15 + 40);
+    sim.free();
+  });
+});

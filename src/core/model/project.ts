@@ -74,7 +74,7 @@ export const SIZES: Record<string, Vec3> = {
   pulleyS: [20, 20, 12], pulleyM: [36, 36, 12], pulleyL: [56, 56, 12], belt: [100, 40, 6],
   bearing: [22, 22, 8], support: [40, 20, 40], link: [100, 14, 6], joint: [30, 20, 20],
   profile60: [60, 10, 10], profile120: [120, 10, 10], profile240: [240, 10, 10],
-  plate: [160, 100, 6], bolt: [10, 10, 20],
+  plate: [160, 100, 6], bolt: [10, 10, 20], bracket: [60, 30, 40],
   sensorAngle: [20, 20, 14], sensorContact: [20, 20, 14], meter: [40, 20, 50], text: [60, 4, 30],
 };
 

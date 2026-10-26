@@ -23,7 +23,7 @@ export const initPhysics = (): Promise<void> => (ready ??= RAPIER.init());
 
 /** Densidad aproximada (kg/m³) según el tipo: los perfiles son huecos. */
 function density(type: string): number {
-  if (type.startsWith("profile") || type === "link" || type === "plate") return 900;
+  if (type.startsWith("profile") || type === "link" || type === "plate" || type === "bracket") return 900;
   if (type === "dcmotor" || type === "stepper" || type === "servo") return 2500;
   return 1200;
 }

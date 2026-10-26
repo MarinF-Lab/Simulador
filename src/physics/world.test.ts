@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { alignedPairs } from "../core/model/holes";
-import type { Part, Project } from "../core/model/project";
+import { extent, type Part, type Project } from "../core/model/project";
 import { initPhysics, Sim } from "./world";
 
 const P = (id: number, type: string, x: number, y: number, z = 0, rot: Part["rot"] = [0, 0, 0], props: Part["props"] = {}): Part => ({ id, type, x, y, z, rot, props });
@@ -125,22 +125,43 @@ describe("actuadores", () => {
 });
 
 describe("brazo de servos del ejemplo", () => {
-  it("cada servo lleva su articulación al ángulo pedido", () => {
+  it("la base gira, y el hombro y el codo suben y bajan al ángulo pedido", () => {
     const st = useProject.getState();
     expect(st.structure.issues).toEqual([]);
     const project = st.project;
+    const part = (id: number) => project.parts.find((p) => p.id === id)!;
     const sim = new Sim(project);
-    const props = (id: number) => project.parts.find((p) => p.id === id)?.props ?? {};
+    const props = (id: number) => part(id).props;
     const volt = (id: number) => st.circuit.readings[id]?.v ?? 0;
-    expect(volt(31)).toBeGreaterThan(5);
+    for (const id of [31, 33, 44]) expect(volt(id)).toBeGreaterThan(5);
     run(sim, 3, volt, props);
     const m = sim.status({ voltage: volt, props }, 0).motors;
-    expect(m[31]!.angle).toBeCloseTo(30, 1);
-    expect(m[33]!.angle).toBeCloseTo(-45, 1);
-    // El eslabón 1 quedó girado 30° alrededor del brazo del servo 1 (en x −210, y −230).
-    const c = sim.poses().get(32)!.p, r = (30 * Math.PI) / 180;
-    expect(c[0]).toBeCloseTo(-210 + 33 * Math.cos(r), 0);
-    expect(c[1]).toBeCloseTo(-230 + 33 * Math.sin(r), 0);
+    expect(m[31]!.angle).toBeCloseTo(45, 1);
+    expect(m[33]!.angle).toBeCloseTo(40, 1);
+    expect(m[44]!.angle).toBeCloseTo(-60, 1);
+    // Eslabón 1: sube 40° alrededor del brazo del servo 2 y todo gira 45° sobre la base.
+    const S1 = holesOf(part(31))[2]!.p, H2 = holesOf(part(33))[2]!.p;
+    const L1 = part(32), c0 = [L1.x, L1.y, L1.z + extent(L1)[2] / 2];
+    const up = (40 * Math.PI) / 180, yaw = (45 * Math.PI) / 180;
+    const dx = c0[0]! - H2[0];
+    const lifted = [H2[0] + dx * Math.cos(up), c0[1]!, H2[2] + dx * Math.sin(up)];
+    const rx = lifted[0]! - S1[0], ry = lifted[1]! - S1[1];
+    const want = [S1[0] + rx * Math.cos(yaw) - ry * Math.sin(yaw), S1[1] + rx * Math.sin(yaw) + ry * Math.cos(yaw), lifted[2]!];
+    const c = sim.poses().get(32)!.p;
+    for (let k = 0; k < 3; k++) expect(c[k]).toBeCloseTo(want[k]!, 0);
     sim.free();
+  });
+
+  it("la base recorre 180°, de −90° a 90°", () => {
+    const st = useProject.getState();
+    const project = st.project;
+    const volt = (id: number) => st.circuit.readings[id]?.v ?? 0;
+    for (const target of [90, -90]) {
+      const sim = new Sim(project);
+      const props = (id: number) => (id === 31 ? { ...project.parts.find((p) => p.id === 31)!.props, target, speed: 120 } : project.parts.find((p) => p.id === id)?.props ?? {});
+      run(sim, 2, volt, props);
+      expect(sim.status({ voltage: volt, props }, 0).motors[31]!.angle).toBeCloseTo(target, 1);
+      sim.free();
+    }
   });
 });

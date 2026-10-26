@@ -106,6 +106,7 @@ export function sectionsFor(kind: PartKind): Section[] {
     case "profile":
     case "plate":
     case "bolt":
+    case "bracket":
     case "bearing":
     case "support":
       return [];

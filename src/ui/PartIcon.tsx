@@ -124,6 +124,13 @@ const SHAPES: Record<PartKind, ReactNode> = {
       <circle cx="20" cy="18" r="3" />
     </>
   ),
+  bracket: (
+    <>
+      <path d="M8 32h26v-5H13V8H8z" className="fill-muted/15" />
+      <circle cx="24" cy="29.5" r="1.6" />
+      <circle cx="10.5" cy="16" r="1.6" />
+    </>
+  ),
   link: (
     <>
       <rect x="4" y="15" width="32" height="10" rx="5" className="fill-muted/15" />

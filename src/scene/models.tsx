@@ -319,6 +319,15 @@ function Model({ type, glow = 0, burned = false, on = true, size }: { type: stri
           <Cyl r={4} h={21} p={[0, 0, 30]} axis="y" m={M.hole} seg={12} />
         </group>
       );
+    case "bracket":
+      return (
+        <group>
+          <Box s={[60, 30, 4]} m={M.steel} />
+          <Box s={[60, 4, 40]} p={[0, -13, 0]} m={M.steel} />
+          {[-20, 0, 20].map((x) => <Cyl key={x} r={3} h={4.4} p={[x, 2, -0.2]} m={M.hole} seg={12} />)}
+          {[-24, 24].map((x) => <Cyl key={x} r={3} h={4.4} p={[x, -13, 24]} axis="y" m={M.hole} seg={12} />)}
+        </group>
+      );
     case "link": {
       const e = size[0] / 2 - 7;
       return (

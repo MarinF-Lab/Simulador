@@ -12,6 +12,19 @@ import { useUI } from "../store/ui";
 
 const row = "flex min-h-11 w-full items-center gap-3 rounded-lg border border-line bg-panel-2 px-3 text-left text-sm hover:border-accent";
 
+type Downloads = { save: (r: { filename: string; data: string }) => Promise<unknown> };
+
+/** Descargas del visor de claude.ai, si la página corre ahí; si no, null. */
+async function artifactDownloads(): Promise<Downloads | null> {
+  const c = (window as unknown as { claude?: { use?: (n: string) => Promise<unknown> } }).claude;
+  if (typeof c?.use !== "function") return null;
+  try {
+    return ((await c.use("downloads")) as Downloads | null) ?? null;
+  } catch {
+    return null;
+  }
+}
+
 /** Reemplaza la mesa: detiene la simulación, limpia los gráficos y ajusta la vista. */
 function apply(project: Project) {
   useUI.setState({ running: false });
@@ -37,12 +50,26 @@ export function ProjectMenu({ onClose }: { onClose: () => void }) {
     ask(name, r.project);
     if (r.dropped) setMsg({ text: `Se descartaron ${r.dropped} elementos que no se pudieron leer.` });
   };
-  const doExport = () => {
+  const doExport = async () => {
+    const data = serialize(useProject.getState().project);
+    const filename = "kinetic-proyecto.json";
+    // Dentro de claude.ai la descarga pasa por el visor, que pide confirmar.
+    const dl = await artifactDownloads();
+    if (dl) {
+      try {
+        await dl.save({ filename, data });
+        setMsg({ text: "Archivo guardado." });
+      } catch (e) {
+        const code = (e as { code?: string }).code;
+        setMsg(code === "declined" ? { text: "Descarga cancelada." } : { text: "No se pudo descargar aquí: usa Copiar JSON.", err: true });
+      }
+      return;
+    }
     try {
-      const url = URL.createObjectURL(new Blob([serialize(useProject.getState().project)], { type: "application/json" }));
+      const url = URL.createObjectURL(new Blob([data], { type: "application/json" }));
       const a = document.createElement("a");
       a.href = url;
-      a.download = "kinetic-proyecto.json";
+      a.download = filename;
       a.click();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
       setMsg({ text: "Archivo descargado. Si no aparece, usa Copiar JSON." });
@@ -93,7 +120,7 @@ export function ProjectMenu({ onClose }: { onClose: () => void }) {
           <section className="space-y-2">
             <h3 className="text-xs font-semibold tracking-wide text-muted uppercase">Archivo</h3>
             <div className="grid grid-cols-2 gap-2">
-              <button className={row} onClick={doExport}><Download className="size-5 text-accent" aria-hidden="true" />Exportar</button>
+              <button className={row} onClick={() => void doExport()}><Download className="size-5 text-accent" aria-hidden="true" />Exportar</button>
               <button className={row} onClick={() => void doCopy()}><ClipboardCopy className="size-5 text-accent" aria-hidden="true" />Copiar JSON</button>
               <button className={row} onClick={() => file.current?.click()}><FolderOpen className="size-5 text-accent" aria-hidden="true" />Importar</button>
               <button className={row} onClick={() => { setPaste(""); setCopyText(null); }}><ClipboardPaste className="size-5 text-accent" aria-hidden="true" />Pegar JSON</button>

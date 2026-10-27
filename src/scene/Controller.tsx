@@ -532,6 +532,9 @@ export function Controller() {
           P().beltTap(d.id);
         } else if (P().glueMode) {
           P().glueTap(d.id);
+        } else if (P().drillMode) {
+          const hp = partPoint(e.clientX, e.clientY);
+          if (hp) P().drillTap(d.id, hp);
         } else if (lastTap.current.id === d.id && now - lastTap.current.t < 350) {
           lastTap.current = { id: 0, t: 0 };
           P().rotate(d.id);

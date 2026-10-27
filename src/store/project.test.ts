@@ -153,3 +153,54 @@ describe("juntas en dos toques", async () => {
     expect(useProject.getState().jointMsg).toMatch(/Pegamento/);
   });
 });
+
+describe("piezas lisas y perforables", async () => {
+  const { holesOf } = await import("../core/model/holes");
+  const { parseDrill } = await import("../core/model/polygon");
+  const custom = () => useProject.getState().project.parts.find((p) => p.type === "custom")!;
+
+  it("la Pieza libre lisa nace sin agujeros", () => {
+    useProject.getState().load({ parts: [], cables: [], joints: [], nextId: 1 });
+    useProject.getState().addNear("customPlain", 0, 0);
+    expect(custom().type).toBe("custom");
+    expect(holesOf(custom())).toHaveLength(0);
+  });
+
+  it("dibujar en modo Lisa crea la pieza sin agujeros", () => {
+    const st = useProject.getState();
+    st.load({ parts: [], cables: [], joints: [], nextId: 1 });
+    st.setDrawHoles(false);
+    st.addNear("draw", 0, 0);
+    for (const [x, y] of [[0, 0], [80, 0], [80, 60], [0, 60]]) useProject.getState().drawAdd(x!, y!);
+    useProject.getState().drawFinish();
+    expect(holesOf(custom())).toHaveLength(0);
+    useProject.getState().setDrawHoles(true);
+  });
+
+  it("el Taladro perfora donde se toca, tapa al tocar de nuevo y se deshace", () => {
+    const st = useProject.getState();
+    st.load({ parts: [{ id: 1, type: "custom", x: 100, y: 0, z: 0, rot: [0, 0, 0], props: { shape: "-40,-20;40,-20;40,20;-40,20", h: 6, holes: "Sin agujeros" } }], cables: [], joints: [], nextId: 2 });
+    st.addNear("drill", 0, 0);
+    useProject.getState().drillTap(1, [112, 5, 6]);
+    expect(parseDrill(custom().props.drill)).toEqual([[12, 5]]);
+    expect(holesOf(custom()).map((h) => h.p.slice(0, 2))).toContainEqual([112, 5]);
+    // Muy cerca del borde: no perfora.
+    useProject.getState().drillTap(1, [139, 0, 6]);
+    expect(useProject.getState().drillMode?.msg).toMatch(/borde/);
+    useProject.getState().drillTap(1, [113, 4, 6]);
+    expect(custom().props.drill).toBeUndefined();
+    useProject.getState().undo();
+    expect(parseDrill(custom().props.drill)).toEqual([[12, 5]]);
+  });
+
+  it("los agujeros perforados no se mueven en la mesa al editar la forma", () => {
+    const st = useProject.getState();
+    st.load({ parts: [{ id: 1, type: "custom", x: 0, y: 0, z: 0, rot: [0, 0, 0], props: { shape: "-40,-20;40,-20;40,20;-40,20", h: 6, holes: "Sin agujeros", drill: "10,0" } }], cables: [], joints: [], nextId: 2 });
+    const s = useProject.getState();
+    s.beginShape(1);
+    s.shapeLive(1, [[-40, -20], [80, -20], [80, 20], [-40, 20]]);
+    s.endShape(1);
+    const hole = holesOf(custom()).find((h) => h.n[2] > 0)!;
+    expect(hole.p.slice(0, 2)).toEqual([10, 0]);
+  });
+});

@@ -1,14 +1,14 @@
 import { create } from "zustand";
 import { apply, cableDiff, emptyHistory, exec, record, redo, removeCableCmd, removeCmd, shapeOf, undo, updateCmd, type CableShape, type Command, type History, type Patch } from "../core/history/commands";
 import { analyze, type Circuit } from "../core/electrical/analyze";
-import { clampZ, extent, findFree, newPart, placeOnTable, RESIZABLE, rotateLocal, type Axis, type Cable, type CableEnd, type Part, type Project, type PropValue, type Vec3 } from "../core/model/project";
+import { clampZ, extent, findFree, newPart, placeOnTable, RESIZABLE, rotateLocal, unrotateLocal, type Axis, type Cable, type CableEnd, type Part, type Project, type PropValue, type Vec3 } from "../core/model/project";
 import { detachFrom, endPos, posKey, reattach, termWorld } from "../core/model/terminals";
 import { snapRotor } from "../core/mechanical/snap";
 import { isRotor } from "../core/mechanical/axes";
 import { solveTrain, type Train } from "../core/mechanical/train";
 import { alignedPairs, alignTo, holeAt, holesOf, nearestHole, restHeight, snapHoles, type HoleRef } from "../core/model/holes";
 import { checkStructure, contactSpot, type StructureCheck } from "../core/model/structure";
-import { centered, isSimple, parseShape, shapeText, type Pt } from "../core/model/polygon";
+import { centered, customHoles, edgeDistance, inside, isSimple, parseDrill, parseShape, shapeText, type Pt } from "../core/model/polygon";
 import type { Joint } from "../core/model/project";
 import { demoProject, wire } from "../core/persistence/examples";
 
@@ -22,14 +22,16 @@ export interface JointOffer {
 }
 
 /** Pieza libre con su forma recentrada en su caja, sin moverse en la mesa. */
-function recentered(p: Part, pts: Pt[]): { x: number; y: number; z: number; props: { shape: string } } {
+function recentered(p: Part, pts: Pt[]): { x: number; y: number; z: number; props: { shape: string; drill: string } } {
   const c = centered(pts);
   const shape = shapeText(c.pts);
+  // Los agujeros perforados se corren con la forma, para no moverse en la mesa.
+  const drill = shapeText(parseDrill(p.props.drill).map(([x, y]) => [x - c.off[0], y - c.off[1]]));
   const ez0 = extent(p)[2];
   const d = rotateLocal([c.off[0], c.off[1], 0], p.rot);
   const ez1 = extent({ ...p, props: { ...p.props, shape } })[2];
   const r = (v: number) => Math.round(v * 10) / 10;
-  return { x: r(p.x + d[0]), y: r(p.y + d[1]), z: r(p.z + ez0 / 2 + d[2] - ez1 / 2), props: { shape } };
+  return { x: r(p.x + d[0]), y: r(p.y + d[1]), z: r(p.z + ez0 / 2 + d[2] - ez1 / 2), props: { shape, drill } };
 }
 
 /** Proyecto con los sensores que la simulación está presionando. */
@@ -140,6 +142,13 @@ interface ProjectState {
   drawCancel: () => void;
   /** Cierra la forma y crea la pieza. Devuelve false si la forma no sirve. */
   drawFinish: () => boolean;
+  /** Al dibujar: la pieza nueva sale con agujeros cada 10 mm o lisa. */
+  drawHoles: boolean;
+  setDrawHoles: (v: boolean) => void;
+  /** Taladro activo, y un aviso si un toque no se pudo perforar. */
+  drillMode: { msg?: string } | null;
+  /** Toque con el Taladro: perfora la pieza libre en ese punto (o tapa un agujero perforado). */
+  drillTap: (id: number, at: Vec3) => void;
   /** Pegando: la primera pieza tocada y, si hace falta, un aviso. */
   glueMode: { first: number | null; msg?: string } | null;
   glueTap: (id: number) => void;
@@ -150,7 +159,7 @@ interface ProjectState {
   selVertex: number | null;
   selectVertex: (i: number | null) => void;
   /** Forma y posición al empezar a editar (para deshacer). */
-  shapeFrom: { x: number; y: number; z: number; shape: string } | null;
+  shapeFrom: { x: number; y: number; z: number; shape: string; drill: string } | null;
   beginShape: (id: number) => void;
   /** Cambia la forma en vivo, sin historial. Devuelve false si los lados se cruzarían. */
   shapeLive: (id: number, pts: Pt[]) => boolean;
@@ -215,7 +224,7 @@ export const useProject = create<ProjectState>((set, get) => {
     },
     dismissJoint: () => set({ jointOffer: null }),
     load: (project) =>
-      set({ project, history: emptyHistory(), selected: null, dragging: null, dragFrom: null, pending: null, jointOffer: null, jointTool: null, beltMode: null, pressed: {}, drawMode: null, glueMode: null, selVertex: null, shapeFrom: null, jointFirst: null, jointMsg: null }),
+      set({ project, history: emptyHistory(), selected: null, dragging: null, dragFrom: null, pending: null, jointOffer: null, jointTool: null, beltMode: null, pressed: {}, drawMode: null, glueMode: null, selVertex: null, shapeFrom: null, jointFirst: null, jointMsg: null, drillMode: null }),
     jointFirst: null,
     jointMsg: null,
     jointTap: (id, at) => {
@@ -300,12 +309,16 @@ export const useProject = create<ProjectState>((set, get) => {
       const b = (get().project.belts ?? []).find((x) => x.id === id);
       if (b) commit({ kind: "updateBelt", id, before: b.cross, after: !b.cross });
     },
-    select: (selected) => set({ selected, pending: null, beltMode: null, jointTool: null, jointFirst: null, jointMsg: null, jointOffer: null, glueMode: null, selVertex: null }),
+    select: (selected) => set({ selected, pending: null, beltMode: null, jointTool: null, jointFirst: null, jointMsg: null, jointOffer: null, glueMode: null, drillMode: null, selVertex: null }),
     setRotAxis: (rotAxis) => set({ rotAxis }),
     run: commit,
 
     addNear: (type, x, y) => {
       const s = get();
+      if (type === "drill") {
+        set({ drillMode: {}, drawMode: null, glueMode: null, beltMode: null, jointTool: null, jointFirst: null, pending: null });
+        return -1;
+      }
       if (type === "draw") {
         set({ drawMode: { pts: [] }, glueMode: null, beltMode: null, jointTool: null, selected: null, pending: null });
         return -1;
@@ -576,11 +589,36 @@ export const useProject = create<ProjectState>((set, get) => {
         return false;
       }
       const c = centered(d.pts);
-      const p = newPart(s.project, "custom", c.off[0], c.off[1]);
+      const p = newPart(s.project, s.drawHoles ? "custom" : "customPlain", c.off[0], c.off[1]);
       p.props = { ...p.props, shape: shapeText(c.pts) };
       commit({ kind: "add", part: p });
       set({ drawMode: null, selected: p.id, shapeMode: "move" });
       return true;
+    },
+
+    drawHoles: true,
+    setDrawHoles: (drawHoles) => set({ drawHoles }),
+    drillMode: null,
+    drillTap: (id, at) => {
+      const p = part(id);
+      if (!get().drillMode || !p) return;
+      if (p.type !== "custom") { set({ drillMode: { msg: "El Taladro solo perfora piezas libres." }, selected: id }); return; }
+      const ez = extent(p)[2];
+      const l = unrotateLocal([at[0] - p.x, at[1] - p.y, at[2] - (p.z + ez / 2)], p.rot);
+      const q: Pt = [Math.round(l[0]), Math.round(l[1])];
+      const drill = parseDrill(p.props.drill);
+      // Tocar un agujero perforado lo tapa.
+      const near = drill.findIndex((d) => Math.hypot(d[0] - q[0], d[1] - q[1]) < 6);
+      let next: Pt[];
+      if (near >= 0) next = drill.filter((_, i) => i !== near);
+      else {
+        const pts = parseShape(p.props.shape);
+        if (!inside(q, pts) || edgeDistance(q, pts) < 3) { set({ drillMode: { msg: "Muy cerca del borde: perfora un poco más adentro." }, selected: id }); return; }
+        if (customHoles(p.props).some((h) => Math.hypot(h[0] - q[0], h[1] - q[1]) < 6)) { set({ drillMode: { msg: "Ya hay un agujero ahí." }, selected: id }); return; }
+        next = [...drill, q];
+      }
+      commit(updateCmd(get().project, id, { props: { drill: next.length ? shapeText(next) : undefined } }));
+      set({ drillMode: {}, selected: id });
     },
 
     glueMode: null,
@@ -607,7 +645,7 @@ export const useProject = create<ProjectState>((set, get) => {
     shapeFrom: null,
     beginShape: (id) => {
       const p = part(id);
-      if (p) set({ shapeFrom: { x: p.x, y: p.y, z: p.z, shape: String(p.props.shape) } });
+      if (p) set({ shapeFrom: { x: p.x, y: p.y, z: p.z, shape: String(p.props.shape), drill: String(p.props.drill ?? "") } });
     },
     shapeLive: (id, pts) => {
       if (!isSimple(pts)) return false;
@@ -621,10 +659,11 @@ export const useProject = create<ProjectState>((set, get) => {
       if (!p || !from) return;
       const after = recentered(p, parseShape(p.props.shape));
       if (from.shape === after.props.shape && from.x === after.x && from.y === after.y && from.z === after.z) return;
+      const opt = (v: string) => v || undefined;
       const cmd: Command = {
         kind: "update", id,
-        before: { x: from.x, y: from.y, z: from.z, props: { shape: from.shape } },
-        after: { x: after.x, y: after.y, z: after.z, props: { shape: after.props.shape } },
+        before: { x: from.x, y: from.y, z: from.z, props: { shape: from.shape, drill: opt(from.drill) } },
+        after: { x: after.x, y: after.y, z: after.z, props: { shape: after.props.shape, drill: opt(after.props.drill) } },
       };
       set({ project: apply({ ...s.project, parts: s.project.parts.map((q) => (q.id === id ? { ...q, x: from.x, y: from.y, z: from.z, props: { ...q.props, shape: from.shape } } : q)) }, cmd), history: record(s.history, cmd) });
     },
@@ -644,7 +683,7 @@ export const useProject = create<ProjectState>((set, get) => {
       const next = pts.filter((_, k) => k !== i);
       if (!isSimple(next)) return;
       const r = recentered(p, next);
-      commit(updateCmd(get().project, id, { x: r.x, y: r.y, z: r.z, props: { shape: r.props.shape } }));
+      commit(updateCmd(get().project, id, { x: r.x, y: r.y, z: r.z, props: { shape: r.props.shape, drill: r.props.drill || undefined } }));
       set({ selVertex: null });
     },
     setCableLive: (id, shape) => setCables(get().project.cables.map((c) => (c.id === id ? { ...c, ends: shape.ends, bend: shape.bend ?? null } : c))),

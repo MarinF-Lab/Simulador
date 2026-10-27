@@ -7,7 +7,7 @@ export type PartKind =
   | "source" | "resistor" | "lamp" | "led" | "switch" | "wire" | "hbridge" | "controller" | "splitter"
   | "dcmotor" | "stepper" | "servo" | "linear"
   | "shaft" | "gear" | "pulley" | "belt" | "bearing" | "wheel" | "piston" | "rope" | "weight" | "support" | "link" | "joint"
-  | "profile" | "plate" | "bolt" | "bracket" | "custom" | "draw" | "glue"
+  | "profile" | "plate" | "bolt" | "bracket" | "custom" | "customPlain" | "draw" | "glue" | "drill"
   | "sensor" | "meter" | "text";
 
 export interface CatalogItem {
@@ -68,7 +68,9 @@ export const CATALOG: CatalogItem[] = [
   { id: "profile240", name: "Perfil metálico", kind: "profile", category: "structures", variant: "240 mm", desc: "Barra metálica con agujeros cada 10 mm, para armar estructuras. Su largo se cambia en Propiedades." },
   { id: "plate", name: "Placa base", kind: "plate", category: "structures", desc: "Base fija a la mesa, con agujeros cada 20 mm. Lo que se apoya encima queda unido a ella al simular. Su largo y ancho se cambian." },
   { id: "bracket", name: "Escuadra", kind: "bracket", category: "structures", variant: "en L", tags: ["ángulo", "angulo", "soporte de servo"], desc: "Pieza en forma de L: agujeros en la base y en el ala vertical. Sirve para montar un servo de lado, por ejemplo sobre otro servo, y así armar brazos que suben y bajan." },
-  { id: "custom", name: "Pieza libre", kind: "custom", category: "structures", tags: ["madera", "forma", "recorte", "diseño libre"], desc: "Placa con la forma que quieras. Selecciónala y elige Editar forma para arrastrar sus vértices y lados; en Propiedades cambias su grosor, material y agujeros." },
+  { id: "custom", name: "Pieza libre", kind: "custom", category: "structures", variant: "con agujeros", tags: ["madera", "forma", "recorte", "diseño libre"], desc: "Placa con la forma que quieras y agujeros cada 10 mm. Selecciónala y elige Editar forma para arrastrar sus vértices y lados; en Propiedades cambias su grosor, material y agujeros." },
+  { id: "customPlain", name: "Pieza libre", kind: "customPlain", category: "structures", variant: "lisa", tags: ["madera", "forma", "lisa", "sin agujeros", "diseño libre"], desc: "Placa con la forma que quieras, sin agujeros. Únela con Pegamento, o hazle agujeros donde quieras con el Taladro." },
+  { id: "drill", name: "Taladro", kind: "drill", category: "structures", tags: ["perforar", "agujero", "broca"], desc: "Herramienta: toca una pieza libre donde quieras un agujero y queda perforada. Tocar un agujero perforado lo tapa. Toca el fondo para terminar." },
   { id: "draw", name: "Dibujar pieza", kind: "draw", category: "structures", tags: ["forma", "polígono", "poligono", "diseño libre"], desc: "Herramienta: toca la mesa para poner los vértices de una pieza nueva y luego Listo. Tocar el primer punto también cierra la forma." },
   { id: "glue", name: "Pegamento", kind: "glue", category: "structures", tags: ["pegar", "silicona", "adhesivo", "unir"], desc: "Herramienta: une dos piezas que se tocan, aunque no tengan agujeros (también a un engranaje o una polea, y giran juntas). Elige Pegamento y toca las dos piezas." },
   { id: "bolt", name: "Unión", kind: "bolt", category: "structures", variant: "perno fijo", tags: ["perno", "tornillo"], desc: "Herramienta: une dos piezas por un agujero para que no se muevan entre sí, como un perno. Elige Unión, toca un agujero de una pieza y luego el de la otra: la segunda se mueve sola hasta alinearse. Sirve también para fijar piezas a un engranaje o una polea." },

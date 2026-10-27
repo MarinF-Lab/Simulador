@@ -4,7 +4,7 @@
 // por ejemplo, la cara de abajo de un perfil sobre la cara de arriba de una placa.
 
 import { extent, rotateLocal, sizeOf, type Part, type Project, type Vec3 } from "./project";
-import { gridInside, parseShape } from "./polygon";
+import { customHoles } from "./polygon";
 
 export interface HoleRef {
   part: number;
@@ -51,7 +51,7 @@ const cache = new Map<string, LocalHole[]>();
 
 function localHoles(part: Pick<Part, "type" | "props">): LocalHole[] {
   const [lx, ly, h] = sizeOf(part.type, part.props);
-  const key = part.type === "custom" ? `custom:${String(part.props.shape)}:${String(part.props.holes)}:${h}` : `${part.type}:${lx}:${ly}`;
+  const key = part.type === "custom" ? `custom:${String(part.props.shape)}:${String(part.props.holes)}:${String(part.props.drill ?? "")}:${h}` : `${part.type}:${lx}:${ly}`;
   const hit = cache.get(key);
   if (hit) return hit;
   let out: LocalHole[] = [];
@@ -87,8 +87,7 @@ function localHoles(part: Pick<Part, "type" | "props">): LocalHole[] {
       break;
     // Pieza libre: agujeros de la grilla elegida que caen dentro de su forma.
     case "custom": {
-      const step = part.props.holes === "Cada 20 mm" ? 20 : part.props.holes === "Sin agujeros" ? 0 : 10;
-      out = step ? through(gridInside(parseShape(part.props.shape), step), h) : [];
+      out = through(customHoles(part.props), h);
       break;
     }
     case "gear10": case "gear20": case "gear40": case "pulleyS": case "pulleyM": case "pulleyL":

@@ -62,7 +62,8 @@ export function Workspace() {
   const item = type ? findItem(type) : undefined;
   const draw = useProject((s) => s.drawMode);
   const glue = useProject((s) => s.glueMode);
-  const { shapeMode, setShapeMode, selVertex, removeVertex, drawUndo, drawCancel, drawFinish } = useProject();
+  const { shapeMode, setShapeMode, selVertex, removeVertex, drawUndo, drawCancel, drawFinish, drawHoles, setDrawHoles } = useProject();
+  const drill = useProject((s) => s.drillMode);
 
   const jointFirst = useProject((s) => s.jointFirst);
   const jointMsg = useProject((s) => s.jointMsg);
@@ -72,6 +73,8 @@ export function Workspace() {
       : draw.pts.length < 3
         ? "Sigue tocando la mesa para agregar vértices."
         : "Agrega más vértices, o toca Listo o el primer punto (verde) para cerrar la forma.")
+    : drill
+    ? drill.msg ?? "Taladro: toca una pieza libre donde quieras un agujero. Toca un agujero perforado para taparlo. Toca el fondo para terminar."
     : glue
     ? glue.msg ?? (glue.first === null ? "Toca la primera pieza que quieres pegar. Toca el fondo para cancelar." : "Ahora toca la pieza que la toca para pegarlas.")
     : type === "custom" && shapeMode === "edit" && !running
@@ -121,6 +124,9 @@ export function Workspace() {
       </Suspense>
 
       <div ref={(el) => { overlay.partTools = el; }} hidden className="absolute top-0 left-0 z-10 flex flex-wrap gap-2">
+        {/* Con una herramienta activa (Taladro, Pegamento, juntas) los botones no deben tapar la pieza. */}
+        {!(drill || glue || jointTool) && (
+          <>
         {!running && type === "custom" && (
           <div role="radiogroup" aria-label="Al arrastrar la pieza" className="flex rounded-full border border-line bg-panel p-1 shadow-lg">
             {([["move", "Mover", Move], ["edit", "Editar forma", PenTool]] as const).map(([m, label, Icon]) => (
@@ -158,6 +164,8 @@ export function Workspace() {
             <button onClick={() => selected !== null && remove(selected)} aria-label="Eliminar pieza" className="grid size-11 place-items-center rounded-full bg-err text-white shadow-lg">
               <Trash2 className="size-5" />
             </button>
+          </>
+        )}
           </>
         )}
       </div>
@@ -248,7 +256,16 @@ export function Workspace() {
       </div>
 
       {draw && (
-        <div role="toolbar" aria-label="Dibujar pieza" className="absolute inset-x-0 bottom-[calc(150px+env(safe-area-inset-bottom,0px))] z-10 flex justify-center gap-2 lg:bottom-20">
+        <div role="toolbar" aria-label="Dibujar pieza" className="absolute inset-x-0 bottom-[calc(150px+env(safe-area-inset-bottom,0px))] z-10 flex flex-wrap justify-center gap-2 px-3 lg:bottom-20">
+          <div role="radiogroup" aria-label="Agujeros de la pieza" className="flex w-full justify-center sm:w-auto">
+            <div className="flex rounded-full border border-line bg-panel p-1 shadow-lg">
+              {([[true, "Con agujeros"], [false, "Lisa"]] as const).map(([v, label]) => (
+                <button key={label} role="radio" aria-checked={drawHoles === v} onClick={() => setDrawHoles(v)} className={"min-h-9 rounded-full px-3 text-xs font-semibold " + (drawHoles === v ? "bg-accent text-accent-ink" : "text-muted")}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
           <button onClick={drawCancel} className="flex min-h-11 items-center gap-1.5 rounded-full border border-line bg-panel px-4 text-sm font-semibold shadow-lg">
             <X className="size-4" aria-hidden="true" /> Cancelar
           </button>

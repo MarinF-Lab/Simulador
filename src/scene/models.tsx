@@ -2,7 +2,7 @@ import { useMemo, type ReactNode } from "react";
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { DEFAULT_SHAPE, sizeOf } from "../core/model/project";
-import { gridInside, parseShape } from "../core/model/polygon";
+import { customHoles, parseShape } from "../core/model/polygon";
 import { ROTOR_HOLES } from "../core/model/holes";
 
 // Modelos 3D simples de cada pieza. Cada modelo se arma con la base en z = 0 y centrado
@@ -210,9 +210,8 @@ const customGeo = new Map<string, THREE.ExtrudeGeometry>();
 /** Pieza libre: su forma extruida a su grosor, con los agujeros de la grilla. */
 function CustomPiece({ props }: { props?: Record<string, unknown> }) {
   const shape = String(props?.shape ?? DEFAULT_SHAPE), h = sizeOf("custom", props)[2];
-  const step = props?.holes === "Cada 20 mm" ? 20 : props?.holes === "Sin agujeros" ? 0 : 10;
-  const holes = step ? gridInside(parseShape(shape), step) : [];
-  const key = `${shape}|${h}|${holes.length}|${String(props?.holes)}`;
+  const holes = customHoles(props);
+  const key = `${shape}|${h}|${String(props?.holes)}|${String(props?.drill ?? "")}`;
   let geo = customGeo.get(key);
   if (!geo) {
     const pts = parseShape(shape);

@@ -106,6 +106,8 @@ export function sectionsFor(kind: PartKind): Section[] {
     case "splitter":
     case "draw":
     case "glue":
+    case "drill":
+    case "customPlain":
       return [];
     case "custom":
       return [{

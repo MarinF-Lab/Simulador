@@ -82,7 +82,7 @@ export const SIZES: Record<string, Vec3> = {
   pulleyS: [20, 20, 12], pulleyM: [36, 36, 12], pulleyL: [56, 56, 12], belt: [100, 40, 6],
   bearing: [22, 22, 8], wheel: [60, 60, 14], piston: [110, 30, 66], support: [40, 20, 40], link: [100, 14, 6], joint: [30, 20, 20],
   profile60: [60, 10, 10], profile120: [120, 10, 10], profile240: [240, 10, 10],
-  plate: [160, 100, 6], bolt: [10, 10, 20], rope: [100, 6, 6], weight: [30, 30, 30], custom: [80, 40, 6], draw: [40, 40, 6], glue: [20, 20, 10], bracket: [60, 30, 40],
+  plate: [160, 100, 6], bolt: [10, 10, 20], rope: [100, 6, 6], weight: [30, 30, 30], custom: [80, 40, 6], customPlain: [80, 40, 6], draw: [40, 40, 6], glue: [20, 20, 10], drill: [20, 20, 40], bracket: [60, 30, 40],
   sensorAngle: [20, 20, 14], sensorContact: [20, 20, 14], meter: [40, 20, 50], text: [60, 4, 30],
 };
 
@@ -191,8 +191,11 @@ export function findFree(part: Part, others: Part[], cx: number, cy: number, gap
 export const DEFAULT_SHAPE = "-40,-20;40,-20;40,20;-40,20";
 
 export function newPart(project: Project, type: string, x = 0, y = 0): Part {
-  const props: Part["props"] = type === "custom" ? { shape: DEFAULT_SHAPE, h: 6, color: "Madera", holes: "Cada 10 mm" } : {};
-  return { id: project.nextId, type, x, y, z: 0, rot: [0, 0, 0], props };
+  // La pieza libre lisa es una pieza libre sin agujeros.
+  if (type === "custom" || type === "customPlain") {
+    return { id: project.nextId, type: "custom", x, y, z: 0, rot: [0, 0, 0], props: { shape: DEFAULT_SHAPE, h: 6, color: "Madera", holes: type === "custom" ? "Cada 10 mm" : "Sin agujeros" } };
+  }
+  return { id: project.nextId, type, x, y, z: 0, rot: [0, 0, 0], props: {} };
 }
 
 /** Caja que encierra todas las piezas (para "Ajustar"). */

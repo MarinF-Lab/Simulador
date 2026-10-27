@@ -1,5 +1,8 @@
 apply plugin: 'com.android.application'
 
+// Número de la ejecución de GitHub Actions (1 al compilar en un computador).
+def runNumber = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInteger()
+
 android {
     namespace "cl.marinflab.kinetic"
     compileSdk rootProject.ext.compileSdkVersion
@@ -8,8 +11,8 @@ android {
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         // Cada APK que arma GitHub sube de versión, para instalarse encima del anterior.
-        versionCode (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInteger()
-        versionName "1.0." + (System.getenv("GITHUB_RUN_NUMBER") ?: "0")
+        versionCode runNumber
+        versionName "1.0.${runNumber}"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

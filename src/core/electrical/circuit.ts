@@ -33,6 +33,8 @@ export interface Elem {
   gain?: number;
   ca?: number;
   cb?: number;
+  /** La fuente controlada toma de su entrada la corriente que entrega (gain · I salida). */
+  draw?: boolean;
 }
 
 export interface Wire {
@@ -72,8 +74,10 @@ export function simulate(nodes: number, elems: Elem[], wires: Wire[]): SimResult
   let R: Record<number, Reading> = {};
   // Voltaje de salida de cada fuente controlada: se ajusta en cada pasada hasta que se estabiliza.
   const srcV = new Map<number, number>();
+  // Corriente que cada fuente controlada con `draw` toma de su entrada.
+  const srcI = new Map<number, number>();
 
-  for (let pass = 0; pass < 16; pass++) {
+  for (let pass = 0; pass < 40; pass++) {
     const G = Array.from({ length: nodes }, () => new Float64Array(nodes));
     const I = new Float64Array(nodes);
     for (let i = 0; i < nodes; i++) G[i]![i]! += GMIN;
@@ -88,6 +92,11 @@ export function simulate(nodes: number, elems: Elem[], wires: Wire[]): SimResult
         stamp(e.a, e.b, 1 / r);
         I[e.b]! += v / r;
         I[e.a]! -= v / r;
+        const iin = srcI.get(e.id) ?? 0;
+        if (iin && e.ca !== undefined && e.cb !== undefined) {
+          I[e.cb]! -= iin;
+          I[e.ca]! += iin;
+        }
       } else if (e.kind === "led") {
         if (on.get(e.id) && !isBurned(e)) {
           const vf = e.vf ?? 2;
@@ -120,6 +129,10 @@ export function simulate(nodes: number, elems: Elem[], wires: Wire[]): SimResult
       if (e.kind === "src" && e.ca !== undefined && e.cb !== undefined) {
         const want = (e.gain ?? 0) * (V[e.cb]! - V[e.ca]!);
         if (Math.abs(want - (srcV.get(e.id) ?? 0)) > 1e-6) { srcV.set(e.id, want); changed = true; }
+        if (e.draw) {
+          const iin = (e.gain ?? 0) * R[e.id]!.i;
+          if (Math.abs(iin - (srcI.get(e.id) ?? 0)) > 1e-6) { srcI.set(e.id, iin); changed = true; }
+        }
       }
     }
     for (const e of elems) {

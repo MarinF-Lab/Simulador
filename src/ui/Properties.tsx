@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { ChannelsPanel } from "./Channels";
 import { ChevronDown, ChevronUp, RotateCw, Trash2 } from "lucide-react";
 import { brightness, ELEC_DEFAULTS } from "../core/electrical/analyze";
 import type { Issue } from "../core/electrical/circuit";
@@ -621,6 +622,7 @@ export function Properties() {
         {part.type === "dcmotor" && <MotorSpeed id={part.id} />}
         {(part.type === "servo" || part.type === "stepper" || part.type === "linear" || part.type === "sensorAngle") && <ActuatorReadings id={part.id} type={part.type} />}
         {part.type === "servo" && <ServoSliders />}
+        {part.type === "controller" && <ChannelsPanel part={part} />}
         {isRotor(part.type) && <Motion id={part.id} />}
 
         {(part.type === "switch" || part.type === "sensorContact") && (

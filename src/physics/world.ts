@@ -221,13 +221,23 @@ export class Sim {
     }
     this.kinEdges = edges;
 
+    // Placa sobre la que se apoya cada pieza (su cara de abajo en la cara de arriba de la placa).
+    const plates = project.parts.filter((p) => p.type === "plate");
+    const restOn = (part: Part): Part | undefined => plates.find((plate) => {
+      if (part.id === plate.id || kin.has(part.id)) return false;
+      const [px, py, pz] = extent(plate), [ex, ey] = extent(part);
+      return Math.abs(part.z - (plate.z + pz)) <= 0.5 && Math.abs(part.x - plate.x) <= (px + ex) / 2 - 1 && Math.abs(part.y - plate.y) <= (py + ey) / 2 - 1;
+    });
+    const anchored = (p: Part | undefined) => !!p && p.type === "plate" && p.props.anchored !== false;
+
     for (const part of project.parts) {
       // Engranajes, poleas y ejes siguen el cálculo de transmisiones: no son cuerpos libres.
       if (ROTORS[part.type]) continue;
       const ez = extent(part)[2];
       const c: Vec3 = [part.x, part.y, part.z + ez / 2];
-      // La placa base queda anclada a la mesa, salvo que se suelte para usarla como chasis.
-      const fixed = part.type === "plate" && part.props.anchored !== false;
+      // La placa base queda anclada a la mesa, salvo que se suelte para usarla como chasis. Lo que
+      // se apoya en una placa anclada queda fijo como ella (más estable que unirlo con una junta).
+      const fixed = anchored(part) || (!ROTORS[part.type] && anchored(restOn(part)));
       const base = fixed ? RAPIER.RigidBodyDesc.fixed() : kin.has(part.id) ? RAPIER.RigidBodyDesc.kinematicPositionBased() : RAPIER.RigidBodyDesc.dynamic();
       const desc = base.setTranslation(c[0] * S, c[1] * S, c[2] * S);
       const body = this.world.createRigidBody(desc);
@@ -272,16 +282,12 @@ export class Sim {
       this.ropes.push({ drum: b.a, r: ax.r, load, a, b: bb, L0, L: L0, joint });
     }
 
-    // Lo que se apoya sobre la placa base queda unido a ella, como atornillado.
-    for (const plate of project.parts.filter((p) => p.type === "plate")) {
-      const P0 = this.bodies.get(plate.id);
-      const [px, py, pz] = extent(plate);
-      if (!P0) continue;
-      for (const part of project.parts) {
-        const B = this.bodies.get(part.id);
-        if (!B || kin.has(part.id) || part.id === plate.id || Math.abs(part.z - (plate.z + pz)) > 0.5) continue;
-        const [ex, ey] = extent(part);
-        if (Math.abs(part.x - plate.x) > (px + ex) / 2 - 1 || Math.abs(part.y - plate.y) > (py + ey) / 2 - 1) continue;
+    // Lo que se apoya sobre una placa suelta (un chasis) queda unido a ella, como atornillado.
+    for (const part of project.parts) {
+      const plate = restOn(part);
+      const P0 = plate && this.bodies.get(plate.id), B = this.bodies.get(part.id);
+      if (!plate || anchored(plate) || !P0 || !B) continue;
+      {
         const a = this.start.get(plate.id)!, b = this.start.get(part.id)!;
         const anchor = { x: (b[0] - a[0]) * S, y: (b[1] - a[1]) * S, z: (b[2] - a[2]) * S };
         const j = this.world.createImpulseJoint(RAPIER.JointData.fixed(anchor, { x: 0, y: 0, z: 0, w: 1 }, { x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 0, w: 1 }), P0, B, true);
@@ -320,7 +326,9 @@ export class Sim {
       if (j.kind === "revolute" || shaft) this.revs.push({ id: j.id, A, B, axis: ha.n as Vec3 });
       if (kind && motorPart) {
         const drv = joint as RAPIER.RevoluteImpulseJoint | RAPIER.PrismaticImpulseJoint;
-        drv.configureMotorModel(RAPIER.MotorModel.ForceBased);
+        // El actuador lineal mueve piezas livianas contra topes y sensores: su motor va por aceleración
+        // (no depende de la masa) para quedar estable al chocar. Los demás, por fuerza.
+        drv.configureMotorModel(kind === "linear" ? RAPIER.MotorModel.AccelerationBased : RAPIER.MotorModel.ForceBased);
         if (kind === "linear") {
           // El vástago sale desde su posición de diseño hasta la carrera.
           (drv as RAPIER.PrismaticImpulseJoint).setLimits(0, num(motorPart.props.stroke, 100) * S);
@@ -445,9 +453,9 @@ export class Sim {
     } else {
       // Actuador lineal: el vástago sale (+) o entra (−) según la polaridad, a su velocidad.
       const speed = num(pr.lspeed, 20) * S;
-      const force = num(pr.force, 30);
       const dir = Math.abs(v) >= 1 ? Math.sign(v) : 0;
-      d.joint.configureMotorVelocity(dir * speed, force / Math.max(speed, 1e-4));
+      // Llega a su velocidad en unos 50 ms.
+      d.joint.configureMotorVelocity(dir * speed, 20);
     }
   }
 

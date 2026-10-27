@@ -72,7 +72,7 @@ export const TABLE = { w: 1200, d: 800, maxZ: 400 };
 /** Tamaño de cada pieza sin girar: largo (X), ancho (Y) y alto (Z), en mm. */
 export const SIZES: Record<string, Vec3> = {
   source: [60, 30, 30], resistor: [40, 10, 10], lamp: [30, 30, 46], led: [20, 10, 22],
-  switch: [40, 20, 20], wire: [80, 10, 20], hbridge: [50, 40, 14],
+  switch: [40, 20, 20], wire: [80, 10, 20], hbridge: [50, 40, 14], controller: [70, 50, 12], splitter: [80, 24, 14],
   dcmotor: [60, 30, 30], stepper: [42, 42, 50], servo: [40, 20, 40], linear: [120, 24, 24],
   shaft: [120, 8, 8], gear10: [24, 24, 8], gear20: [44, 44, 8], gear40: [84, 84, 8],
   pulleyS: [20, 20, 12], pulleyM: [36, 36, 12], pulleyL: [56, 56, 12], belt: [100, 40, 6],

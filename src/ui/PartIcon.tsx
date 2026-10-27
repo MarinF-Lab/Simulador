@@ -118,6 +118,19 @@ const SHAPES: Record<PartKind, ReactNode> = {
       ))}
     </>
   ),
+  controller: (
+    <>
+      <rect x="6" y="9" width="28" height="22" rx="2" className="fill-muted/15" />
+      <rect x="15" y="16" width="8" height="6" className="fill-current" stroke="none" />
+      <path d="M10 9V5M16 9V5M24 9V5M30 9V5M10 31v4M16 31v4M24 31v4M30 31v4" />
+    </>
+  ),
+  splitter: (
+    <>
+      <rect x="4" y="14" width="32" height="12" rx="2" className="fill-muted/15" />
+      {[10, 17, 24, 31].map((x) => <circle key={x} cx={x} cy="20" r="2" />)}
+    </>
+  ),
   wheel: (
     <>
       <circle cx="20" cy="20" r="14" className="fill-muted/15" strokeWidth="4" />

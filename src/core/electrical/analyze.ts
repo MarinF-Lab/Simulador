@@ -1,10 +1,11 @@
 // Convierte la mesa en un circuito: nodos por posición de bornes y puntas de cable.
 
 import { findItem } from "../model/catalog";
-import type { Project } from "../model/project";
+import type { Part, Project } from "../model/project";
 import { endPos, posKey, TERMINALS, termWorld } from "../model/terminals";
 import { fmt } from "../model/units";
 import { diagnose, simulate, type Elem, type ElemKind, type Issue, type Reading, type Wire } from "./circuit";
+import { channelId, channelOf, CHANNELS, effectiveMode, gainOf } from "./controller";
 
 const KIND: Record<string, ElemKind> = {
   source: "bat", resistor: "res", switch: "sw", sensorContact: "sw", lamp: "bulb", dcmotor: "motor", led: "led", meter: "meter",
@@ -32,6 +33,7 @@ export function elemName(type: string, props: Record<string, unknown>): string {
     case "stepper": return "El motor paso a paso";
     case "linear": return "El actuador lineal";
     case "hbridge": return "El puente H";
+    case "controller": return "La placa de control";
     case "dcmotor": return "El motor";
     case "meter": return "El voltímetro";
     default: return findItem(type)?.name ?? "La pieza";
@@ -59,7 +61,39 @@ export function analyze(project: Project): Circuit {
     return n;
   };
   const elems: Elem[] = [];
+  // Ids internos del circuito → pieza que los muestra (entrada del puente H, canales).
+  const owner = new Map<number, number>();
+  // Repartidor: sus salidas son el mismo nodo que su entrada (− con −, + con +). Va primero para
+  // que lo que toque sus bornes caiga en ese nodo.
+  for (const part of project.parts.filter((p) => p.type === "splitter")) {
+    const pin = [node(posKey(termWorld(part, 0))), node(posKey(termWorld(part, 1)))];
+    for (let t = 0; t < (TERMINALS.splitter?.length ?? 0); t++) {
+      const k = posKey(termWorld(part, t));
+      if (t > 1 && !idx.has(k)) idx.set(k, pin[t % 2]!);
+      occ[idx.get(k)!]!++;
+    }
+  }
+  // Canales de las placas de control: se agregan después de los cables, solo si su salida está usada.
+  const pending: { part: number; k: number; a: number; b: number; ca: number; cb: number; gain: number; off: boolean }[] = [];
+  const pressed = new Set(project.parts.filter((p) => p.type === "sensorContact" && p.props.pressed === true).map((p) => p.id));
+  // Sensores que usa algún canal: avisan a la placa sin cables, así que sin cables no cuentan como sueltos.
+  const linked = new Set(project.parts.filter((p) => p.type === "controller").flatMap((p) => Array.from({ length: CHANNELS }, (_, k) => channelOf(p, k).sensor)));
+  const later: Part[] = [];
   for (const part of project.parts) {
+    if (part.type === "splitter") continue;
+    // Placa de control: la entrada es una carga de 10 kΩ y cada canal una fuente controlada
+    // que toma de la entrada la corriente que entrega.
+    if (part.type === "controller") {
+      const n = Array.from({ length: 2 + 2 * CHANNELS }, (_, t) => node(posKey(termWorld(part, t))));
+      n.forEach((x) => occ[x]!++);
+      elems.push({ id: part.id, kind: "res", a: n[0]!, b: n[1]!, r: 10_000, name: elemName(part.type, part.props) });
+      for (let k = 0; k < CHANNELS; k++) {
+        const c = channelOf(part, k);
+        const mode = effectiveMode(c, pressed.has(c.sensor));
+        pending.push({ part: part.id, k, a: n[2 + 2 * k]!, b: n[3 + 2 * k]!, ca: n[0]!, cb: n[1]!, gain: gainOf(mode, c.power), off: mode === "Apagado" });
+      }
+      continue;
+    }
     // Puente H: la entrada es una carga de 1 kΩ y la salida, una fuente que copia el voltaje de
     // entrada con el signo del sentido elegido (Adelante +1, Atrás −1, Freno 0).
     if (part.type === "hbridge") {
@@ -69,11 +103,16 @@ export function analyze(project: Project): Circuit {
       const gain = dir === "Atrás" ? -1 : dir === "Freno" ? 0 : 1;
       const name = elemName(part.type, part.props);
       elems.push({ id: -part.id, kind: "res", a: n[0]!, b: n[1]!, r: 1000, name });
+      owner.set(-part.id, part.id);
       elems.push({ id: part.id, kind: "src", a: n[2]!, b: n[3]!, gain, ca: n[0]!, cb: n[1]!, name });
       continue;
     }
+    if (part.type === "sensorContact" && linked.has(part.id)) { later.push(part); continue; }
+    addElem(part);
+  }
+  function addElem(part: Part) {
     const kind = KIND[part.type];
-    if (!kind || !TERMINALS[part.type]) continue;
+    if (!kind || !TERMINALS[part.type]) return;
     const a = node(posKey(termWorld(part, 0))), b = node(posKey(termWorld(part, 1)));
     occ[a]!++; occ[b]!++;
     const pr = part.props, d = ELEC_DEFAULTS[part.type] ?? {};
@@ -97,6 +136,16 @@ export function analyze(project: Project): Circuit {
     wires.push({ id: c.id, a, b });
     wireEnds[c.id] = [a, b];
   }
+  for (const part of later) {
+    if ([0, 1].some((t) => idx.has(posKey(termWorld(part, t))))) addElem(part);
+  }
+  // Un canal Apagado deja su salida abierta; uno sin nada conectado no cuenta como pieza suelta.
+  for (const c of pending) {
+    if (c.off || ((occ[c.a] ?? 0) < 2 && (occ[c.b] ?? 0) < 2)) continue;
+    const id = channelId(c.part, c.k);
+    owner.set(id, c.part);
+    elems.push({ id, kind: "src", a: c.a, b: c.b, gain: c.gain, ca: c.ca, cb: c.cb, draw: true, name: `El canal ${c.k + 1} de la placa de control` });
+  }
 
   const sim = simulate(idx.size, elems, wires);
   const { issues, flag } = diagnose({
@@ -119,12 +168,13 @@ export function analyze(project: Project): Circuit {
   }
   for (const w of wires) side[w.id] = pol.get(w.a) ?? pol.get(w.b) ?? null;
 
-  // La entrada del puente H usa id negativo por dentro: los avisos se muestran en la pieza.
-  const fixedIssues = issues.map((i) => ({ ...i, ids: [...new Set(i.ids.map(Math.abs))] }));
+  // Los ids internos (entrada del puente H, canales) se muestran en su pieza.
+  const own = (id: number) => owner.get(id) ?? id;
+  const fixedIssues = issues.map((i) => ({ ...i, ids: [...new Set(i.ids.map(own))] }));
   const seen = new Set<string>();
   const uniq = fixedIssues.filter((i) => { const k = i.h + i.t; if (seen.has(k)) return false; seen.add(k); return true; });
   const fixedFlag: Record<number, "err" | "warn"> = {};
-  for (const [id, f] of Object.entries(flag)) { const k = Math.abs(+id); if (fixedFlag[k] !== "err") fixedFlag[k] = f; }
+  for (const [id, f] of Object.entries(flag)) { const k = own(+id); if (fixedFlag[k] !== "err") fixedFlag[k] = f; }
   return { ...sim, issues: uniq, flag: fixedFlag, side, occAt: (k) => occ[idx.get(k) ?? -1] ?? 0 };
 }
 

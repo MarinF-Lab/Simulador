@@ -4,7 +4,7 @@ export type CategoryId = "electrical" | "motors" | "mechanical" | "structures" |
 
 /** Familia de la pieza: decide qué secciones de Propiedades se muestran. */
 export type PartKind =
-  | "source" | "resistor" | "lamp" | "led" | "switch" | "wire" | "hbridge"
+  | "source" | "resistor" | "lamp" | "led" | "switch" | "wire" | "hbridge" | "controller" | "splitter"
   | "dcmotor" | "stepper" | "servo" | "linear"
   | "shaft" | "gear" | "pulley" | "belt" | "bearing" | "wheel" | "piston" | "rope" | "weight" | "support" | "link" | "joint"
   | "profile" | "plate" | "bolt" | "bracket"
@@ -39,6 +39,8 @@ export const CATALOG: CatalogItem[] = [
   { id: "switch", name: "Interruptor", kind: "switch", category: "electrical", desc: "Abre o cierra el paso de la corriente. Con el botón Abrir o Cerrar, sobre la pieza, apagas o enciendes lo que alimenta." },
   { id: "wire", name: "Cable", kind: "wire", category: "electrical", desc: "Une dos bornes. También puedes crear cables tocando un borne y luego otro. Rojo es el lado +, azul el lado −." },
   { id: "hbridge", name: "Puente H", kind: "hbridge", category: "electrical", tags: ["controlador", "driver"], desc: "Controla el sentido de un motor sin cambiar los cables. Entrada: la pila. Salida: el motor. Con su botón eliges Adelante, Atrás o Freno." },
+  { id: "controller", name: "Placa de control", kind: "controller", category: "electrical", tags: ["receptor", "control remoto", "driver", "canales", "inversor"], desc: "Placa con 4 canales, como la de un auto a control remoto. Conecta la pila a su entrada y un motor o una luz a cada canal. Cada canal elige su sentido (Adelante, Atrás, Freno o Apagado) y su potencia, y puede detenerse o invertirse cuando un sensor de contacto se presiona." },
+  { id: "splitter", name: "Repartidor", kind: "splitter", category: "electrical", tags: ["regleta", "bornera", "distribuidor", "repartición"], desc: "Regleta que reparte la pila a 4 salidas. Cada salida tiene su − y su +, unidos a la entrada: así alimentas varias piezas desde una sola pila." },
 
   { id: "dcmotor", name: "Motor DC", kind: "dcmotor", category: "motors", desc: "Gira cuando recibe voltaje: más voltaje, más rápido. Monta un engranaje, una polea o un eslabón en la punta de su eje para que lo mueva." },
   { id: "stepper", name: "Motor paso a paso", kind: "stepper", category: "motors", tags: ["stepper"], desc: "Motor que avanza en pasos fijos, por ejemplo 200 por vuelta. Sirve para girar a un ángulo exacto o a una velocidad constante." },

@@ -175,6 +175,58 @@ function craneExample(): Project {
   return { parts: [base, post(2, -50), post(3, 50), top, motor, drum, load, bat, sw], cables, belts: [{ id: 13, a: 6, b: 7, cross: false, rope: true }], joints: [], nextId: 14 };
 }
 
+/** Monta una pieza en la punta de un actuador: con el agujero que mira a la punta y lo más arriba posible. */
+function onTip(act: Part, part: Part): { part: Part; h: number; tip: number } {
+  const tip = holesOf(act).findIndex((h) => h.shaft), t = holesOf(act)[tip]!;
+  const best = holesOf(part)
+    .map((h, i) => ({ h, i }))
+    .filter(({ h }) => h.n[0] * t.n[0] + h.n[1] * t.n[1] + h.n[2] * t.n[2] < -0.99)
+    .map(({ i }) => ({ i, p: onHole(part, i, t.p) }))
+    .sort((a, b) => b.p.z - a.p.z)[0]!;
+  return { part: best.p, h: best.i, tip };
+}
+
+/** Placa de control: una pila reparte energía a una luz y a una placa de 4 canales que mueve tres mecanismos. */
+function controllerExample(): Project {
+  const bat: Part = { id: 1, type: "source", x: -470, y: 250, z: 0, rot: [0, 0, 0], props: { v: 6 } };
+  const split: Part = { id: 2, type: "splitter", x: -340, y: 250, z: 0, rot: [0, 0, 0], props: {} };
+  const lamp: Part = { id: 3, type: "lamp", x: -340, y: 340, z: 0, rot: [0, 0, 0], props: { vn: 6 } };
+  // Canal 1 a todo, canal 2 a la mitad y hacia atrás, canal 3 se detiene al tocar el sensor.
+  const ctl: Part = { id: 4, type: "controller", x: -180, y: 250, z: 0, rot: [0, 0, 0], props: { m1: "Adelante", p1: 100, m2: "Atrás", p2: 50, m3: "Adelante", p3: 100, s3: 19, a3: "Detener" } };
+  // Canal 1: motor de pie con engranajes 10 → 40.
+  const plateA: Part = { id: 5, type: "plate", x: 20, y: 250, z: 0, rot: [0, 0, 0], props: { lx: 180, ly: 120 } };
+  const m1: Part = { id: 6, type: "dcmotor", x: -20, y: 250, z: 6, rot: [0, 3, 0], props: { rpm: 60, torque: 0.8, vnom: 6 } };
+  const g10: Part = { id: 7, type: "gear10", x: -20, y: 250, z: 57, rot: [0, 0, 0], props: {} };
+  const axle: Part = { id: 8, type: "shaft", x: 30, y: 250, z: 6, rot: [0, 3, 0], props: { lx: 60 } };
+  const g40: Part = { id: 9, type: "gear40", x: 30, y: 250, z: 57, rot: [0, 0, 0], props: {} };
+  // Canal 2: motor de pie con un brazo en el eje.
+  const plateB: Part = { id: 10, type: "plate", x: 250, y: 250, z: 0, rot: [0, 0, 0], props: { lx: 140, ly: 120 } };
+  const m2: Part = { id: 11, type: "dcmotor", x: 250, y: 250, z: 6, rot: [0, 3, 0], props: { rpm: 60, torque: 0.8, vnom: 6 } };
+  const shaft2 = holesOf(m2).findIndex((h) => h.shaft);
+  const arm = onHole({ id: 12, type: "link", x: 0, y: 0, z: 0, rot: [0, 0, 0], props: { lx: 80 } }, 1, holesOf(m2)[shaft2]!.p);
+  // Canal 3: actuador lineal con una paleta en la punta; frente a ella, el sensor que lo detiene.
+  const plateC: Part = { id: 13, type: "plate", x: 60, y: -150, z: 0, rot: [0, 0, 0], props: { lx: 320, ly: 100 } };
+  const act: Part = { id: 14, type: "linear", x: -20, y: -150, z: 6, rot: [0, 0, 0], props: { stroke: 100, lspeed: 20, vnom: 6 } };
+  const paddle = onTip(act, { id: 15, type: "link", x: 0, y: 0, z: 0, rot: [0, 1, 0], props: { lx: 60 } });
+  const tipX = holesOf(act)[paddle.tip]!.p[0];
+  const sensor: Part = { id: 19, type: "sensorContact", x: tipX + 6 + 40 + 10, y: -150, z: 6, rot: [0, 0, 0], props: {} };
+  const parts = [bat, split, lamp, ctl, plateA, m1, g10, axle, g40, plateB, m2, arm, plateC, act, paddle.part, sensor];
+  const cables = [
+    wire(20, bat, 1, split, 1), wire(21, bat, 0, split, 0),
+    wire(22, split, 3, ctl, 1), wire(23, split, 2, ctl, 0),
+    wire(24, split, 5, lamp, 1), wire(25, split, 4, lamp, 0),
+    // Cada canal: B al + de lo que mueve y A al −.
+    wire(26, ctl, 3, m1, 1), wire(27, ctl, 2, m1, 0),
+    wire(28, ctl, 5, m2, 1), wire(29, ctl, 4, m2, 0),
+    wire(30, ctl, 7, act, 1), wire(31, ctl, 6, act, 0),
+  ];
+  const joints: Joint[] = [
+    { id: 32, kind: "revolute", a: { part: 12, h: 1 }, b: { part: 11, h: shaft2 } },
+    { id: 33, kind: "fixed", a: { part: 15, h: paddle.h }, b: { part: 14, h: paddle.tip } },
+  ];
+  return { parts, cables, belts: [], joints, nextId: 34 };
+}
+
 export interface Example {
   id: string;
   name: string;
@@ -188,5 +240,6 @@ export const EXAMPLES: Example[] = [
   { id: "car", name: "Auto con tracción", desc: "Un chasis con 4 motores DC y ruedas. Al iniciar, los motores giran y el auto avanza por la mesa.", build: carExample },
   { id: "crane", name: "Grúa con polea y cuerda", desc: "Un motor arriba del pórtico enrolla la cuerda en su polea y levanta la pesa. Invierte su polaridad para bajarla.", build: craneExample },
   { id: "crank", name: "Biela, manivela y pistón", desc: "El motor gira la manivela y la biela convierte ese giro en el vaivén del émbolo dentro del cilindro.", build: crankExample },
+  { id: "controller", name: "Placa de control", desc: "Una pila reparte energía a una luz y a una placa de 4 canales: un motor con engranajes, otro a media potencia hacia atrás y un actuador que se detiene al tocar su sensor.", build: controllerExample },
   { id: "gears", name: "Tren 10 → 40 con correa", desc: "El motor mueve un engranaje de 10 dientes, que mueve uno de 40, y una correa pasa el giro a otra polea.", build: gearBeltExample },
 ];

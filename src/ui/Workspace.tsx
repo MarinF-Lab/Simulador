@@ -7,6 +7,7 @@ import { useProject } from "../store/project";
 import { useUI } from "../store/ui";
 import { useIssues } from "./useIssues";
 import { PartIcon } from "./PartIcon";
+import { RemotePanel } from "./Channels";
 
 const Scene = lazy(() => import("../scene/Scene").then((m) => ({ default: m.Scene })));
 
@@ -149,6 +150,7 @@ export function Workspace() {
         </button>
       </div>
 
+      {running && <RemotePanel />}
       {running && (
         <span className="pointer-events-none absolute top-14 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full border border-ok/40 bg-panel px-3 py-1 text-xs font-medium text-ok">
           <span className="size-2 rounded-full bg-ok motion-safe:animate-pulse" aria-hidden="true" />

@@ -182,6 +182,9 @@ export interface ModelState {
   on?: boolean;
 }
 
+const PCB = mat("#b4542a", { roughness: 0.6 });
+const PLASTIC = mat("#e9e6dc", { roughness: 0.7 });
+
 function Model({ type, glow = 0, burned = false, on = true, size }: { type: string; size: [number, number, number] } & ModelState) {
   switch (type) {
     case "source":
@@ -331,6 +334,27 @@ function Model({ type, glow = 0, burned = false, on = true, size }: { type: stri
           <Box s={[30, 30, 26]} m={M.dark} />
           <Box s={[22, 22, 2]} p={[0, 0, 26]} m={M.steel} />
           <Cyl r={3} h={2.4} p={[0, 0, 27.8]} m={M.hole} seg={12} />
+        </group>
+      );
+    case "controller":
+      return (
+        <group>
+          <Box s={[70, 50, 2]} m={PCB} />
+          <Box s={[14, 9, 3]} p={[-6, 2, 2]} m={M.black} />
+          <Box s={[8, 6, 2]} p={[12, 4, 2]} m={M.black} />
+          <Cyl r={4} h={8} p={[24, -2, 2]} m={M.black} seg={16} />
+          <Cyl r={1} h={40} p={[30, 14, 2]} m={M.steel} seg={8} />
+          {/* Borneras: entrada a la izquierda y un par por canal arriba y abajo. */}
+          <Box s={[8, 22, 10]} p={[-31, 0, 2]} m={M.dark} />
+          {[-8, 12].flatMap((x) => [21, -21].map((y) => <Box key={`${x}${y}`} s={[18, 7, 10]} p={[x, y, 2]} m={M.dark} />))}
+        </group>
+      );
+    case "splitter":
+      return (
+        <group>
+          <Box s={[80, 24, 10]} m={PLASTIC} />
+          <Box s={[8, 24, 10.4]} p={[-34, 0, -0.2]} m={M.accent} />
+          {[-34, -16, -2, 12, 26].flatMap((x) => [-6, 6].map((y) => <Cyl key={`${x}${y}`} r={2.6} h={4} p={[x, y, 10]} m={M.steel} seg={12} />))}
         </group>
       );
     case "wheel":

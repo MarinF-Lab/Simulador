@@ -227,3 +227,35 @@ describe("grúa del ejemplo", () => {
     sim.free();
   });
 });
+
+describe("placa de control del ejemplo", () => {
+  it("el actuador avanza hasta tocar el sensor y la placa lo detiene", async () => {
+    const { EXAMPLES } = await import("../core/persistence/examples");
+    const { analyze } = await import("../core/electrical/analyze");
+    const project = EXAMPLES.find((e) => e.id === "controller")!.build();
+    const warn = analyze(project).issues.filter((i) => i.s === "warn" || i.s === "err");
+    expect(warn).toEqual([]);
+    const sim = new Sim(project);
+    const props = (id: number) => project.parts.find((p) => p.id === id)?.props ?? {};
+    let c = analyze(project);
+    const env = { voltage: (id: number) => c.readings[id]?.v ?? 0, props };
+    expect(env.voltage(14)).toBeGreaterThan(5);
+    let touched = -1;
+    for (let i = 0; i < 360; i++) {
+      sim.step(1 / 60, env);
+      if (i % 6 === 0) {
+        // Como en la app: los sensores presionados cambian el circuito.
+        const pressed = sim.status(env, 0.1).pressed;
+        c = analyze({ ...project, parts: project.parts.map((p) => (pressed[p.id] ? { ...p, props: { ...p.props, pressed: true } } : p)) });
+        if (pressed[19] && touched < 0) touched = i;
+      }
+    }
+    expect(touched).toBeGreaterThan(0);
+    expect(Math.abs(env.voltage(14))).toBeLessThan(0.05);
+    const ext = sim.extensions().get(14)!;
+    // La paleta estaba a 40 mm del sensor: se detuvo cerca de ahí, lejos del final de la carrera.
+    expect(ext).toBeGreaterThan(30);
+    expect(ext).toBeLessThan(60);
+    sim.free();
+  });
+});

@@ -17,10 +17,28 @@ export const TERMINALS: Record<string, Vec3[]> = {
   stepper: [[-21, -8, -15], [-21, 8, -15]],
   linear: [[-60, -6, 4], [-60, 6, 4]],
   hbridge: [[-25, -10, -5], [-25, 10, -5], [25, -10, -5], [25, 10, -5]],
+  // Placa de control: entrada − y + a la izquierda; canales 1 y 2 arriba, 3 y 4 abajo (A, B).
+  controller: [
+    [-31, -6, 6], [-31, 6, 6],
+    [-12, 21, 6], [-4, 21, 6], [8, 21, 6], [16, 21, 6],
+    [-12, -21, 6], [-4, -21, 6], [8, -21, 6], [16, -21, 6],
+  ],
+  // Repartidor: entrada − y + a la izquierda; 4 salidas (− y +) a lo largo de la regleta.
+  splitter: [
+    [-34, -6, 7], [-34, 6, 7],
+    [-16, -6, 7], [-16, 6, 7], [-2, -6, 7], [-2, 6, 7], [12, -6, 7], [12, 6, 7], [26, -6, 7], [26, 6, 7],
+  ],
 };
 
 /** Piezas con polaridad: su borne + se marca en rojo. */
 export const POLAR = new Set(["source", "led", "dcmotor", "meter"]);
+
+/** Bornes que se marcan en rojo como +. */
+export function isPlus(type: string, t: number): boolean {
+  if (type === "controller") return t === 1;
+  if (type === "splitter") return t % 2 === 1;
+  return t === 1 && POLAR.has(type);
+}
 
 export const hasTerminals = (type: string): boolean => type in TERMINALS;
 

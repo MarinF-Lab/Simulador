@@ -283,3 +283,60 @@ describe("molino del ejemplo", () => {
     sim.free();
   });
 });
+
+describe("piezas sobre engranajes y poleas", () => {
+  const spinSetup = async (top: (gear: Part) => { part: Part; joint: Project["joints"] }) => {
+    const { analyze } = await import("../core/electrical/analyze");
+    const { solveTrain } = await import("../core/mechanical/train");
+    const { motorSpeeds } = await import("../store/project");
+    const { termWorld } = await import("../core/model/terminals");
+    const plate = P(1, "plate", 0, 0, 0, [0, 0, 0], { lx: 200, ly: 200 });
+    const motor = P(2, "dcmotor", 0, 0, 6, [0, 3, 0], { rpm: 60, vnom: 6 });
+    const bat = P(3, "source", 0, 150, 0, [0, 0, 0], { v: 6 });
+    const gear = P(4, "gear40", 0, 0, 57);
+    const t = top(gear);
+    const cable = (id: number, a: Part, ta: number, b: Part, tb: number) => {
+      const [x0, y0, z0] = termWorld(a, ta), [x1, y1, z1] = termWorld(b, tb);
+      return { id, ends: [{ att: { part: a.id, t: ta }, x: x0, y: y0, z: z0 }, { att: { part: b.id, t: tb }, x: x1, y: y1, z: z1 }] as Project["cables"][number]["ends"] };
+    };
+    const project: Project = { parts: [plate, motor, bat, gear, t.part], cables: [cable(10, bat, 1, motor, 1), cable(11, motor, 0, bat, 0)], joints: t.joint, nextId: 20 };
+    const c = analyze(project);
+    const rpm = solveTrain(project, motorSpeeds(project, c)).rpm;
+    return { project, rpm, c };
+  };
+  const angleAt = (p: number[]) => Math.atan2(p[1]!, p[0]!);
+
+  it("un eslabón unido a un agujero del engranaje da vueltas con él", async () => {
+    const { project, rpm, c } = await spinSetup((gear) => {
+      const link = alignHole(P(5, "link", 0, 0, 0, [0, 0, 0], { lx: 40 }), 1, holesOf(gear)[2]!.p);
+      return { part: link, joint: [{ id: 6, kind: "fixed", a: { part: 5, h: 1 }, b: { part: 4, h: 2 } }] };
+    });
+    expect(Math.abs(rpm[4] ?? 0)).toBeGreaterThan(50);
+    const sim = new Sim(project);
+    const env = { voltage: (id: number) => c.readings[id]?.v ?? 0, props: (id: number) => project.parts.find((p) => p.id === id)?.props ?? {}, rpm: (id: number) => rpm[id] ?? 0 };
+    const a0 = angleAt(sim.poses().get(5)!.p);
+    for (let i = 0; i < 15; i++) sim.step(1 / 60, env); // 0,25 s a ~60 RPM: un cuarto de vuelta
+    let da = angleAt(sim.poses().get(5)!.p) - a0;
+    while (da < -Math.PI) da += 2 * Math.PI;
+    while (da > Math.PI) da -= 2 * Math.PI;
+    expect(Math.abs(da)).toBeGreaterThan((60 * Math.PI) / 180);
+    expect(Math.abs(da)).toBeLessThan((120 * Math.PI) / 180);
+    // El engranaje no aparece entre las poses: se dibuja girando con el tren.
+    expect(sim.poses().has(4)).toBe(false);
+    sim.free();
+  });
+
+  it("una pieza pegada encima del engranaje gira con él", async () => {
+    const { project, rpm, c } = await spinSetup((gear) => {
+      const piece: Part = { id: 5, type: "custom", x: 20, y: 0, z: gear.z + 8, rot: [0, 0, 0], props: { shape: "-20,-6;20,-6;20,6;-20,6", h: 4, holes: "Sin agujeros" } };
+      return { part: piece, joint: [{ id: 6, kind: "glue", a: { part: 5, h: -1 }, b: { part: 4, h: -1 } }] };
+    });
+    const sim = new Sim(project);
+    const env = { voltage: (id: number) => c.readings[id]?.v ?? 0, props: (id: number) => project.parts.find((p) => p.id === id)?.props ?? {}, rpm: (id: number) => rpm[id] ?? 0 };
+    for (let i = 0; i < 15; i++) sim.step(1 / 60, env);
+    const p = sim.poses().get(5)!.p;
+    expect(Math.abs(angleAt(p))).toBeGreaterThan((60 * Math.PI) / 180);
+    expect(p[2]).toBeGreaterThan(60);
+    sim.free();
+  });
+});

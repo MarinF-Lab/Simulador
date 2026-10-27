@@ -1,5 +1,6 @@
+import { useLayoutEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
-import { holeAt } from "../core/model/holes";
+import { holeAt, holesOf } from "../core/model/holes";
 import { jointPoint } from "../core/model/structure";
 import { useProject } from "../store/project";
 
@@ -60,6 +61,42 @@ export function Joints() {
           </group>
         );
       })}
+    </group>
+  );
+}
+
+const ringGeo = new THREE.TorusGeometry(4, 0.9, 6, 20);
+const ringMat = new THREE.MeshBasicMaterial({ color: "#8b8bff" });
+const firstMat = new THREE.MeshBasicMaterial({ color: "#ffffff" });
+const Z = new THREE.Vector3(0, 0, 1);
+
+/** Con Junta rotacional o Unión elegidas: un anillo en cada agujero, y el primero tocado en blanco. */
+export function HoleMarkers() {
+  const tool = useProject((s) => s.jointTool);
+  const first = useProject((s) => s.jointFirst);
+  const parts = useProject((s) => s.project.parts);
+  const holes = useMemo(() => (tool ? parts.flatMap((p) => holesOf(p)) : []), [tool, parts]);
+  const ref = useRef<THREE.InstancedMesh>(null);
+  useLayoutEffect(() => {
+    const m = ref.current;
+    if (!m) return;
+    const o = new THREE.Object3D();
+    holes.forEach((h, i) => {
+      o.position.set(h.p[0] + h.n[0] * 0.6, h.p[1] + h.n[1] * 0.6, h.p[2] + h.n[2] * 0.6);
+      o.quaternion.setFromUnitVectors(Z, new THREE.Vector3(...h.n));
+      o.updateMatrix();
+      m.setMatrixAt(i, o.matrix);
+    });
+    m.instanceMatrix.needsUpdate = true;
+  }, [holes]);
+  const fh = first && holeAt({ parts }, first);
+  if (!tool) return null;
+  return (
+    <group name="holemarks">
+      {holes.length > 0 && <instancedMesh key={holes.length} ref={ref} args={[ringGeo, ringMat, holes.length]} />}
+      {fh && (
+        <mesh geometry={ringGeo} material={firstMat} scale={1.5} position={[fh.p[0] + fh.n[0], fh.p[1] + fh.n[1], fh.p[2] + fh.n[2]]} quaternion={new THREE.Quaternion().setFromUnitVectors(Z, new THREE.Vector3(...fh.n))} />
+      )}
     </group>
   );
 }

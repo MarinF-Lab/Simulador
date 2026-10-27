@@ -34,4 +34,17 @@ describe("imán mecánico", () => {
     const s = snapRotor(proj([a]), P(2, "pulleyS", 0, 0), 55, 48)!;
     expect([s.x, s.y, s.z]).toEqual([50, 50, 8]);
   });
+
+  it("un eje corto soltado sobre un engranaje lo atraviesa y quedan unidos", () => {
+    const m = P(1, "dcmotor", -200, 0, 0);
+    const g = P(2, "gear20", 0, 0);
+    const shaft: Part = { ...P(3, "shaft", 0, 0), props: { lx: 40 } };
+    const s = snapRotor(proj([m, g, shaft]), shaft, 3, -2)!;
+    expect(s.rot).toEqual([0, 1, 0]);
+    expect([s.x, s.y, s.z]).toEqual([0, 0, 0]);
+    const t = solveTrain(proj([m, g, { ...shaft, ...s }]), {});
+    expect(t.link[2]).toBe("eje");
+    expect(t.link[3]).toBe("eje");
+    expect(t.issues.some((i) => i.h === "Pieza suelta")).toBe(false);
+  });
 });

@@ -124,3 +124,26 @@ export function gridInside(pts: Pt[], step: number): Pt[] {
   }
   return out;
 }
+
+/** Lee los agujeros perforados ("x,y;x,y"). A diferencia de la forma, puede haber 0, 1 o 2. */
+export function parseDrill(s: unknown): Pt[] {
+  if (typeof s !== "string" || !s) return [];
+  const out: Pt[] = [];
+  for (const pair of s.split(";")) {
+    const [x, y] = pair.split(",").map(Number);
+    if (Number.isFinite(x) && Number.isFinite(y)) out.push([x!, y!]);
+  }
+  return out;
+}
+
+/** Agujeros de una pieza libre: los de la grilla elegida y los perforados que caen dentro de la forma. */
+export function customHoles(props: Record<string, unknown> | undefined): Pt[] {
+  const pts = parseShape(props?.shape);
+  if (!pts.length) return [];
+  const step = props?.holes === "Cada 20 mm" ? 20 : props?.holes === "Sin agujeros" ? 0 : 10;
+  const out = step ? gridInside(pts, step) : [];
+  for (const d of parseDrill(props?.drill)) {
+    if (inside(d, pts) && edgeDistance(d, pts) >= 3 && !out.some((o) => Math.hypot(o[0] - d[0], o[1] - d[1]) < 6)) out.push(d);
+  }
+  return out;
+}

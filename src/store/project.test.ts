@@ -107,3 +107,100 @@ describe("diseño libre", async () => {
     expect(useProject.getState().structure.issues.map((i) => i.h)).toContain("Pegamento sin contacto");
   });
 });
+
+describe("juntas en dos toques", async () => {
+  const { holesOf, alignTo } = await import("../core/model/holes");
+
+  it("alignTo pone un agujero sobre otro, solo si las caras son opuestas", () => {
+    const gear = { id: 1, type: "gear40", x: 0, y: 0, z: 0, rot: [0, 0, 0] as [number, number, number], props: {} };
+    const link = { id: 2, type: "link", x: 200, y: 50, z: 0, rot: [0, 0, 0] as [number, number, number], props: { lx: 60 } };
+    const top = holesOf(gear)[2]!; // anillo, cara de arriba
+    const pos = alignTo(link, 1, top)!; // agujero del eslabón, cara de abajo
+    expect(pos.z).toBe(8);
+    const moved = holesOf({ ...link, ...pos })[1]!;
+    expect(moved.p.map((v) => Math.round(v))).toEqual(top.p.map((v) => Math.round(v)));
+    expect(alignTo(link, 0, top)).toBeNull(); // cara de arriba con cara de arriba: no
+  });
+
+  it("toca un agujero del engranaje y luego el eslabón: el eslabón se sube, se une y se deshace en un paso", () => {
+    const gear = { id: 1, type: "gear40", x: 0, y: 0, z: 0, rot: [0, 0, 0] as [number, number, number], props: {} };
+    const link = { id: 2, type: "link", x: 200, y: 50, z: 0, rot: [0, 0, 0] as [number, number, number], props: { lx: 60 } };
+    const st = useProject.getState();
+    st.load({ parts: [gear, link], cables: [], joints: [], nextId: 3 });
+    st.addNear("joint", 0, 0);
+    const ring = holesOf(gear)[2]!.p;
+    useProject.getState().jointTap(1, [ring[0] + 1, ring[1], ring[2]]);
+    expect(useProject.getState().jointFirst).toEqual({ part: 1, h: 2 });
+    useProject.getState().jointTap(2, [200 - 23, 50, 0]);
+    const s = useProject.getState();
+    expect(s.project.joints).toHaveLength(1);
+    expect(s.project.joints![0]!.kind).toBe("revolute");
+    const moved = s.project.parts.find((p) => p.id === 2)!;
+    expect(moved.z).toBe(8);
+    expect(s.structure.issues).toEqual([]);
+    expect(s.jointTool).toBeNull();
+    s.undo();
+    const back = useProject.getState();
+    expect(back.project.joints).toHaveLength(0);
+    expect(back.project.parts.find((p) => p.id === 2)!.x).toBe(200);
+  });
+
+  it("una pieza sin agujeros avisa que use Pegamento", () => {
+    const st = useProject.getState();
+    st.load({ parts: [{ id: 1, type: "source", x: 0, y: 0, z: 0, rot: [0, 0, 0], props: {} }], cables: [], joints: [], nextId: 2 });
+    st.addNear("bolt", 0, 0);
+    useProject.getState().jointTap(1, [0, 0, 30]);
+    expect(useProject.getState().jointMsg).toMatch(/Pegamento/);
+  });
+});
+
+describe("piezas lisas y perforables", async () => {
+  const { holesOf } = await import("../core/model/holes");
+  const { parseDrill } = await import("../core/model/polygon");
+  const custom = () => useProject.getState().project.parts.find((p) => p.type === "custom")!;
+
+  it("la Pieza libre lisa nace sin agujeros", () => {
+    useProject.getState().load({ parts: [], cables: [], joints: [], nextId: 1 });
+    useProject.getState().addNear("customPlain", 0, 0);
+    expect(custom().type).toBe("custom");
+    expect(holesOf(custom())).toHaveLength(0);
+  });
+
+  it("dibujar en modo Lisa crea la pieza sin agujeros", () => {
+    const st = useProject.getState();
+    st.load({ parts: [], cables: [], joints: [], nextId: 1 });
+    st.setDrawHoles(false);
+    st.addNear("draw", 0, 0);
+    for (const [x, y] of [[0, 0], [80, 0], [80, 60], [0, 60]]) useProject.getState().drawAdd(x!, y!);
+    useProject.getState().drawFinish();
+    expect(holesOf(custom())).toHaveLength(0);
+    useProject.getState().setDrawHoles(true);
+  });
+
+  it("el Taladro perfora donde se toca, tapa al tocar de nuevo y se deshace", () => {
+    const st = useProject.getState();
+    st.load({ parts: [{ id: 1, type: "custom", x: 100, y: 0, z: 0, rot: [0, 0, 0], props: { shape: "-40,-20;40,-20;40,20;-40,20", h: 6, holes: "Sin agujeros" } }], cables: [], joints: [], nextId: 2 });
+    st.addNear("drill", 0, 0);
+    useProject.getState().drillTap(1, [112, 5, 6]);
+    expect(parseDrill(custom().props.drill)).toEqual([[12, 5]]);
+    expect(holesOf(custom()).map((h) => h.p.slice(0, 2))).toContainEqual([112, 5]);
+    // Muy cerca del borde: no perfora.
+    useProject.getState().drillTap(1, [139, 0, 6]);
+    expect(useProject.getState().drillMode?.msg).toMatch(/borde/);
+    useProject.getState().drillTap(1, [113, 4, 6]);
+    expect(custom().props.drill).toBeUndefined();
+    useProject.getState().undo();
+    expect(parseDrill(custom().props.drill)).toEqual([[12, 5]]);
+  });
+
+  it("los agujeros perforados no se mueven en la mesa al editar la forma", () => {
+    const st = useProject.getState();
+    st.load({ parts: [{ id: 1, type: "custom", x: 0, y: 0, z: 0, rot: [0, 0, 0], props: { shape: "-40,-20;40,-20;40,20;-40,20", h: 6, holes: "Sin agujeros", drill: "10,0" } }], cables: [], joints: [], nextId: 2 });
+    const s = useProject.getState();
+    s.beginShape(1);
+    s.shapeLive(1, [[-40, -20], [80, -20], [80, 20], [-40, 20]]);
+    s.endShape(1);
+    const hole = holesOf(custom()).find((h) => h.n[2] > 0)!;
+    expect(hole.p.slice(0, 2)).toEqual([10, 0]);
+  });
+});

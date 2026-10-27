@@ -144,6 +144,14 @@ const SHAPES: Record<PartKind, ReactNode> = {
       {[[6, 30], [12, 12], [28, 8], [34, 22]].map(([x, y]) => <circle key={x} cx={x} cy={y} r="2.4" className="fill-accent/40" />)}
     </>
   ),
+  customPlain: <path d="M6 30l4-20 14-4 10 12-6 14z" className="fill-muted/15" />,
+  drill: (
+    <>
+      <path d="M8 10h14l4 4-4 4H8z" className="fill-muted/15" />
+      <path d="M26 14h8M22 18l-2 6 4 2-2 6" />
+      <circle cx="13" cy="30" r="3" className="fill-accent/40" />
+    </>
+  ),
   glue: (
     <>
       <rect x="4" y="22" width="16" height="10" rx="1" className="fill-muted/15" />

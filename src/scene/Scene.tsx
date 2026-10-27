@@ -11,7 +11,7 @@ import { ROTORS } from "../core/mechanical/axes";
 import { useUI } from "../store/ui";
 import { Belts, Ropes } from "./Mechanical";
 import { DrawPreview, ShapeHandles } from "./Shapes";
-import { Joints } from "./Structure";
+import { HoleMarkers, Joints } from "./Structure";
 import { PhysicsRunner } from "./Physics";
 import { simPoses, useSim } from "../store/sim";
 import { partQuat } from "../physics/world";
@@ -209,6 +209,7 @@ export function Scene() {
       <Belts />
       <Ropes />
       {!running && <Joints />}
+      {!running && <HoleMarkers />}
       <DrawPreview />
       <ShapeHandles />
       {running && <PhysicsRunner />}

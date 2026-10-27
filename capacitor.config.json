@@ -1,0 +1,9 @@
+{
+  "appId": "cl.marinflab.kinetic",
+  "appName": "KINETIC",
+  "webDir": "dist",
+  "backgroundColor": "#0f1424",
+  "android": {
+    "backgroundColor": "#0f1424"
+  }
+}

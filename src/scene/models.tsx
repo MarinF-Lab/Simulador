@@ -1,7 +1,8 @@
 import { useMemo, type ReactNode } from "react";
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
-import { sizeOf } from "../core/model/project";
+import { DEFAULT_SHAPE, sizeOf } from "../core/model/project";
+import { gridInside, parseShape } from "../core/model/polygon";
 
 // Modelos 3D simples de cada pieza. Cada modelo se arma con la base en z = 0 y centrado
 // en x, y; el contenedor lo baja a la mitad de su alto para que gire sobre su centro.
@@ -183,9 +184,35 @@ export interface ModelState {
 }
 
 const PCB = mat("#b4542a", { roughness: 0.6 });
+/** Materiales de la pieza libre. */
+export const CUSTOM_MAT: Record<string, THREE.Material> = {
+  Madera: mat("#a87443", { roughness: 0.85 }),
+  Aluminio: mat("#b9c1cc", { roughness: 0.35, metalness: 0.6 }),
+  Acrílico: mat("#86c3ef", { roughness: 0.15, transparent: true, opacity: 0.7 }),
+  Cartón: mat("#bf9f6c", { roughness: 0.95 }),
+};
+const customGeo = new Map<string, THREE.ExtrudeGeometry>();
+
+/** Pieza libre: su forma extruida a su grosor, con los agujeros de la grilla. */
+function CustomPiece({ props }: { props?: Record<string, unknown> }) {
+  const shape = String(props?.shape ?? DEFAULT_SHAPE), h = sizeOf("custom", props)[2];
+  const step = props?.holes === "Cada 20 mm" ? 20 : props?.holes === "Sin agujeros" ? 0 : 10;
+  const holes = step ? gridInside(parseShape(shape), step) : [];
+  const key = `${shape}|${h}|${holes.length}|${String(props?.holes)}`;
+  let geo = customGeo.get(key);
+  if (!geo) {
+    const pts = parseShape(shape);
+    const s = new THREE.Shape(pts.map(([x, y]) => new THREE.Vector2(x, y)));
+    for (const [x, y] of holes) s.holes.push(new THREE.Path().absarc(x, y, 3, 0, Math.PI * 2, true));
+    geo = new THREE.ExtrudeGeometry(s, { depth: h, bevelEnabled: false, curveSegments: 10 });
+    if (customGeo.size > 60) customGeo.clear();
+    customGeo.set(key, geo);
+  }
+  return <mesh geometry={geo} material={CUSTOM_MAT[String(props?.color)] ?? CUSTOM_MAT.Madera} castShadow receiveShadow />;
+}
 const PLASTIC = mat("#e9e6dc", { roughness: 0.7 });
 
-function Model({ type, glow = 0, burned = false, on = true, size }: { type: string; size: [number, number, number] } & ModelState) {
+function Model({ type, glow = 0, burned = false, on = true, size, props }: { type: string; size: [number, number, number]; props?: Record<string, unknown> } & ModelState) {
   switch (type) {
     case "source":
       return (
@@ -336,6 +363,8 @@ function Model({ type, glow = 0, burned = false, on = true, size }: { type: stri
           <Cyl r={3} h={2.4} p={[0, 0, 27.8]} m={M.hole} seg={12} />
         </group>
       );
+    case "custom":
+      return <CustomPiece props={props} />;
     case "controller":
       return (
         <group>
@@ -464,7 +493,7 @@ export function PartModel({ type, glow, burned, on, props }: { type: string; pro
   const size = sizeOf(type, props);
   return (
     <group position={[0, 0, -size[2] / 2]}>
-      <Model type={type} glow={glow} burned={burned} on={on} size={size} />
+      <Model type={type} glow={glow} burned={burned} on={on} size={size} props={props} />
     </group>
   );
 }

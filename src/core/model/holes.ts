@@ -4,6 +4,7 @@
 // por ejemplo, la cara de abajo de un perfil sobre la cara de arriba de una placa.
 
 import { extent, rotateLocal, sizeOf, type Part, type Project, type Vec3 } from "./project";
+import { gridInside, parseShape } from "./polygon";
 
 export interface HoleRef {
   part: number;
@@ -39,7 +40,7 @@ const cache = new Map<string, LocalHole[]>();
 
 function localHoles(part: Pick<Part, "type" | "props">): LocalHole[] {
   const [lx, ly, h] = sizeOf(part.type, part.props);
-  const key = `${part.type}:${lx}:${ly}`;
+  const key = part.type === "custom" ? `custom:${String(part.props.shape)}:${String(part.props.holes)}:${h}` : `${part.type}:${lx}:${ly}`;
   const hit = cache.get(key);
   if (hit) return hit;
   let out: LocalHole[] = [];
@@ -73,6 +74,12 @@ function localHoles(part: Pick<Part, "type" | "props">): LocalHole[] {
     case "link":
       out = through([[-(lx / 2 - 7), 0], [lx / 2 - 7, 0]], h);
       break;
+    // Pieza libre: agujeros de la grilla elegida que caen dentro de su forma.
+    case "custom": {
+      const step = part.props.holes === "Cada 20 mm" ? 20 : part.props.holes === "Sin agujeros" ? 0 : 10;
+      out = step ? through(gridInside(parseShape(part.props.shape), step), h) : [];
+      break;
+    }
     case "bearing":
     case "wheel":
       out = through([[0, 0]], h);

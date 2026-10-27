@@ -10,6 +10,7 @@ import { brightness } from "../core/electrical/analyze";
 import { ROTORS } from "../core/mechanical/axes";
 import { useUI } from "../store/ui";
 import { Belts, Ropes } from "./Mechanical";
+import { DrawPreview, ShapeHandles } from "./Shapes";
 import { Joints } from "./Structure";
 import { PhysicsRunner } from "./Physics";
 import { simPoses, useSim } from "../store/sim";
@@ -208,6 +209,8 @@ export function Scene() {
       <Belts />
       <Ropes />
       {!running && <Joints />}
+      <DrawPreview />
+      <ShapeHandles />
       {running && <PhysicsRunner />}
       <FlowTicker />
       <Controller />

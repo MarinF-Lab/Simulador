@@ -3,6 +3,7 @@
 import { alignedPairs, holesOf } from "../model/holes";
 import type { Cable, Joint, Part, Project, Vec3 } from "../model/project";
 import { termWorld } from "../model/terminals";
+import { centered, regular, shapeText, type Pt } from "../model/polygon";
 
 export function wire(id: number, a: Part, ta: number, b: Part, tb: number): Cable {
   const [x0, y0, z0] = termWorld(a, ta), [x1, y1, z1] = termWorld(b, tb);
@@ -227,6 +228,33 @@ function controllerExample(): Project {
   return { parts, cables, belts: [], joints, nextId: 34 };
 }
 
+/** Molino de piezas libres: un disco de 12 lados en el eje de un motor, con 3 aspas pegadas. */
+function windmillExample(): Project {
+  const plate: Part = { id: 1, type: "plate", x: 0, y: 0, z: 0, rot: [0, 0, 0], props: { lx: 120, ly: 120 } };
+  const motor: Part = { id: 2, type: "dcmotor", x: 0, y: 0, z: 6, rot: [0, 3, 0], props: { rpm: 30, torque: 0.8, vnom: 6 } };
+  const shaft = holesOf(motor).findIndex((h) => h.shaft);
+  const tip = holesOf(motor)[shaft]!.p;
+  // Disco: su agujero del centro, por abajo, va en la punta del eje.
+  const disc0: Part = { id: 3, type: "custom", x: 0, y: 0, z: 0, rot: [0, 0, 0], props: { shape: shapeText(regular(12, 40)), h: 4, color: "Acrílico", holes: "Cada 10 mm" } };
+  const center = holesOf(disc0).findIndex((h) => h.n[2] < -0.9 && Math.abs(h.p[0]) < 0.1 && Math.abs(h.p[1]) < 0.1);
+  const disc = onHole(disc0, center, tip);
+  // Aspas: triángulos largos apoyados sobre el disco, a 120° entre sí.
+  const blades = [0, 1, 2].map((k): Part => {
+    const a = (k * 2 * Math.PI) / 3;
+    const tri: Pt[] = ([[12, -12], [100, 0], [12, 12]] as Pt[]).map(([x, y]) => [x * Math.cos(a) - y * Math.sin(a), x * Math.sin(a) + y * Math.cos(a)]);
+    const c = centered(tri);
+    return { id: 4 + k, type: "custom", x: disc.x + c.off[0], y: disc.y + c.off[1], z: disc.z + 4, rot: [0, 0, 0], props: { shape: shapeText(c.pts), h: 3, color: "Madera", holes: "Sin agujeros" } };
+  });
+  const bat: Part = { id: 7, type: "source", x: -60, y: 130, z: 0, rot: [0, 0, 0], props: { v: 6 } };
+  const sw: Part = { id: 8, type: "switch", x: 60, y: 130, z: 0, rot: [0, 0, 0], props: {} };
+  const cables = [wire(9, bat, 1, sw, 0), wire(10, sw, 1, motor, 1), wire(11, motor, 0, bat, 0)];
+  const joints: Joint[] = [
+    { id: 12, kind: "revolute", a: { part: 3, h: center }, b: { part: 2, h: shaft } },
+    ...blades.map((b, k): Joint => ({ id: 13 + k, kind: "glue", a: { part: b.id, h: -1 }, b: { part: 3, h: -1 } })),
+  ];
+  return { parts: [plate, motor, disc, ...blades, bat, sw], cables, belts: [], joints, nextId: 16 };
+}
+
 export interface Example {
   id: string;
   name: string;
@@ -241,5 +269,6 @@ export const EXAMPLES: Example[] = [
   { id: "crane", name: "Grúa con polea y cuerda", desc: "Un motor arriba del pórtico enrolla la cuerda en su polea y levanta la pesa. Invierte su polaridad para bajarla.", build: craneExample },
   { id: "crank", name: "Biela, manivela y pistón", desc: "El motor gira la manivela y la biela convierte ese giro en el vaivén del émbolo dentro del cilindro.", build: crankExample },
   { id: "controller", name: "Placa de control", desc: "Una pila reparte energía a una luz y a una placa de 4 canales: un motor con engranajes, otro a media potencia hacia atrás y un actuador que se detiene al tocar su sensor.", build: controllerExample },
+  { id: "windmill", name: "Molino de piezas libres", desc: "Un disco de 12 lados hecho con Pieza libre gira en el eje de un motor, y lleva 3 aspas triangulares pegadas con Pegamento.", build: windmillExample },
   { id: "gears", name: "Tren 10 → 40 con correa", desc: "El motor mueve un engranaje de 10 dientes, que mueve uno de 40, y una correa pasa el giro a otra polea.", build: gearBeltExample },
 ];

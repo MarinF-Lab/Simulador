@@ -1,14 +1,15 @@
 import { useEffect, useRef } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
-import { bounds, extent, TABLE, type Cable, type Vec3 } from "../core/model/project";
+import { bounds, extent, rotateLocal, sizeOf, TABLE, unrotateLocal, type Cable, type Part, type Vec3 } from "../core/model/project";
+import { parseShape, type Pt } from "../core/model/polygon";
 import { endPos, TERMINALS, termWorld } from "../core/model/terminals";
 import { snap } from "../core/model/units";
 import { useProject, type TermRef } from "../store/project";
 import { useUI } from "../store/ui";
 import { shapeOf, type CableShape } from "../core/history/commands";
 import { cableMid } from "./cableCurve";
-import { holeAt } from "../core/model/holes";
+import { jointPoint } from "../core/model/structure";
 import { overlay, sceneApi } from "./api";
 
 // Cámara ortográfica libre y gestos de la mesa:
@@ -36,7 +37,11 @@ type Drag =
   /** Punto de doblez (modo Doblar), sobre un plano horizontal a la altura h. */
   | { kind: "bend"; pid: number; sx: number; sy: number; id: number; before: CableShape; h: number; moved: boolean; onHandle: boolean }
   | { kind: "part"; pid: number; sx: number; sy: number; id: number; off: { x: number; y: number }; from: { x: number; y: number }; moved: boolean }
-  | { kind: "ext"; id: number };
+  | { kind: "ext"; id: number }
+  /** Vértice de una pieza libre (Editar forma). */
+  | { kind: "vtx"; pid: number; sx: number; sy: number; id: number; i: number; moved: boolean }
+  /** Lado de una pieza libre: se mueve entero desde donde se tomó. */
+  | { kind: "edge"; pid: number; sx: number; sy: number; id: number; i: number; l0: Pt; base: Pt[]; moved: boolean };
 
 const reduced = (() => {
   try {
@@ -137,7 +142,7 @@ export function Controller() {
     invalidate();
   };
 
-  type Hit = { kind: "end"; id: number; i: 0 | 1 } | { kind: "bend"; id: number } | { kind: "term"; ref: TermRef } | { kind: "part"; id: number } | { kind: "cable"; id: number } | { kind: "belt"; id: number } | { kind: "joint"; id: number };
+  type Hit = { kind: "vtx"; i: number } | { kind: "edge"; i: number } | { kind: "end"; id: number; i: 0 | 1 } | { kind: "bend"; id: number } | { kind: "term"; ref: TermRef } | { kind: "part"; id: number } | { kind: "cable"; id: number } | { kind: "belt"; id: number } | { kind: "joint"; id: number };
 
   /** Qué hay bajo el dedo. Prioridad: puntas de cable, bornes (si no están tapados), piezas y cables. */
   const hitAny = (cx: number, cy: number): Hit | null => {
@@ -148,6 +153,9 @@ export function Controller() {
       const g = scene.getObjectByName(name);
       return g ? ray.current.intersectObjects(g.children, true)[0] : undefined;
     };
+    const sh = first("shape");
+    if (sh?.object.userData.shapeV !== undefined) return { kind: "vtx", i: sh.object.userData.shapeV as number };
+    if (sh?.object.userData.shapeE !== undefined) return { kind: "edge", i: sh.object.userData.shapeE as number };
     const end = first("ends");
     if (end?.object.userData.cableEnd) return { kind: "end", ...(end.object.userData.cableEnd as { id: number; i: 0 | 1 }) };
     const jh = first("joints");
@@ -203,11 +211,40 @@ export function Controller() {
     return { p: [Math.min(hx, Math.max(-hx, snap(g.x))), Math.min(hy, Math.max(-hy, snap(g.y))), 0], att: null };
   };
 
+  /** Punto bajo el dedo en la cara de arriba de una pieza, en mm locales (ajustado a 5 mm). */
+  const localOnTop = (cx: number, cy: number, p: Part): Pt | null => {
+    const r = rect();
+    const ndc = new THREE.Vector2(((cx - r.left) / r.width) * 2 - 1, -((cy - r.top) / r.height) * 2 + 1);
+    ray.current.setFromCamera(ndc, cam);
+    const h = extent(p)[2], c = new THREE.Vector3(p.x, p.y, p.z + h / 2);
+    const n = new THREE.Vector3(...rotateLocal([0, 0, 1], p.rot));
+    const top = c.clone().addScaledVector(n, sizeOf(p.type, p.props)[2] / 2);
+    const hit = ray.current.ray.intersectPlane(new THREE.Plane().setFromNormalAndCoplanarPoint(n, top), new THREE.Vector3());
+    if (!hit) return null;
+    const l = unrotateLocal([hit.x - c.x, hit.y - c.y, hit.z - c.z], p.rot);
+    return [Math.round(l[0] / 5) * 5, Math.round(l[1] / 5) * 5];
+  };
+
   /** Lleva lo arrastrado (pieza, punta o cable nuevo) bajo el dedo. */
   const followPointer = () => {
     const d = drag.current, l = last.current;
     if (!d || !l || d.kind === "pan" || d.kind === "orbit") return;
     const st = useProject.getState();
+    if (d.kind === "vtx" || d.kind === "edge") {
+      const p = st.project.parts.find((q) => q.id === d.id);
+      const at = p && localOnTop(l.x, l.y, p);
+      if (!p || !at) return;
+      if (d.kind === "vtx") {
+        const pts = parseShape(p.props.shape);
+        pts[d.i] = at;
+        st.shapeLive(d.id, pts);
+      } else {
+        const dx = at[0] - d.l0[0], dy = at[1] - d.l0[1];
+        const j = (d.i + 1) % d.base.length;
+        st.shapeLive(d.id, d.base.map((q, k) => (k === d.i || k === j ? [q[0] + dx, q[1] + dy] : q)));
+      }
+      return;
+    }
     if (d.kind === "cmove") {
       const g = ground(l.x, l.y);
       if (!g) return;
@@ -303,6 +340,19 @@ export function Controller() {
       invalidate();
     };
 
+    /** Toque en modo dibujo: cerca del primer punto cierra la forma; si no, agrega un vértice. */
+    const drawTap = (cx: number, cy: number) => {
+      const st = P(), pts = st.drawMode?.pts ?? [];
+      if (pts.length >= 3) {
+        const f = toScreen([pts[0]![0], pts[0]![1], 0]);
+        if (Math.hypot(f.x - cx, f.y - cy) < 22) { st.drawFinish(); return; }
+      }
+      const g = ground(cx, cy);
+      if (!g) return;
+      const hx = TABLE.w / 2, hy = TABLE.d / 2;
+      st.drawAdd(Math.min(hx, Math.max(-hx, Math.round(g.x / 5) * 5)), Math.min(hy, Math.max(-hy, Math.round(g.y / 5) * 5)));
+    };
+
     const down = (e: PointerEvent) => {
       if (e.button === 2) {
         try { el.setPointerCapture(e.pointerId); } catch { /* sin captura */ }
@@ -328,6 +378,25 @@ export function Controller() {
       const g = ground(e.clientX, e.clientY);
       const base = { pid: e.pointerId, sx: e.clientX, sy: e.clientY, moved: false };
       const st = P();
+      // Dibujando: tocar la mesa pone un vértice (arrastrar sigue moviendo la vista).
+      if (st.drawMode) {
+        if (g) drag.current = { kind: "pan", ...base, p0: g, tapCable: null };
+        return;
+      }
+      const sp = st.selected !== null ? st.project.parts.find((q) => q.id === st.selected) : undefined;
+      if ((hit?.kind === "vtx" || hit?.kind === "edge") && sp) {
+        if (hit.kind === "vtx") drag.current = { kind: "vtx", ...base, id: sp.id, i: hit.i };
+        else {
+          const l0 = localOnTop(e.clientX, e.clientY, sp);
+          if (l0) drag.current = { kind: "edge", ...base, id: sp.id, i: hit.i, l0, base: parseShape(sp.props.shape) };
+        }
+        return;
+      }
+      // En Editar forma, arrastrar el cuerpo de la pieza mueve la vista (no la pieza).
+      if (hit?.kind === "part" && sp && hit.id === sp.id && sp.type === "custom" && st.shapeMode === "edit" && g) {
+        drag.current = { kind: "pan", ...base, p0: g, tapCable: sp.id };
+        return;
+      }
       const selCable = hit?.kind === "cable" && st.selected === hit.id ? st.project.cables.find((q) => q.id === hit.id) : undefined;
       if (hit?.kind === "end") {
         const c = st.project.cables.find((q) => q.id === hit.id)!;
@@ -384,6 +453,7 @@ export function Controller() {
         if (d.kind === "part") P().beginDrag(d.id);
         if (d.kind === "term") d.wire = P().startWire(d.ref);
         if (d.kind === "end" || d.kind === "cmove" || d.kind === "bend") P().beginEndDrag(d.id);
+        if (d.kind === "vtx" || d.kind === "edge") P().beginShape(d.id);
       }
       if (!d.moved) return;
       if (d.kind === "pan") {
@@ -407,8 +477,18 @@ export function Controller() {
       drag.current = null;
       if (d.kind === "orbit") return;
       const cancel = e.type === "pointercancel";
+      if (d.kind === "vtx" || d.kind === "edge") {
+        if (d.moved) P().endShape(d.id);
+        else if (!cancel) {
+          if (d.kind === "vtx") P().selectVertex(P().selVertex === d.i ? null : d.i);
+          else P().insertVertex(d.id, d.i);
+        }
+        return;
+      }
       if (d.kind === "pan") {
-        if (!d.moved && !cancel) {
+        if (!d.moved && !cancel && P().drawMode) {
+          drawTap(e.clientX, e.clientY);
+        } else if (!d.moved && !cancel) {
           if (d.tapCable !== null) P().select(d.tapCable);
           else { P().select(null); P().cancelPending(); }
         }
@@ -439,6 +519,8 @@ export function Controller() {
           P().jointTap(d.id, g2 ? [g2.x, g2.y, g2.z] : [0, 0, 0]);
         } else if (P().beltMode) {
           P().beltTap(d.id);
+        } else if (P().glueMode) {
+          P().glueTap(d.id);
         } else if (lastTap.current.id === d.id && now - lastTap.current.t < 350) {
           lastTap.current = { id: 0, t: 0 };
           P().rotate(d.id);
@@ -587,8 +669,8 @@ export function Controller() {
     const sc = st.project.cables.find((q) => q.id === st.selected);
     place(overlay.cableTools, sc ? cableMid(st.project, sc) : null, -(overlay.cableTools?.offsetWidth ?? 160) / 2, -70);
     const sj = (st.project.joints ?? []).find((q) => q.id === st.selected);
-    const jp = sj && holeAt(st.project, sj.a);
-    place(overlay.jointTools, jp ? jp.p : null, -(overlay.jointTools?.offsetWidth ?? 160) / 2, -70);
+    const jp = sj && jointPoint(st.project, sj);
+    place(overlay.jointTools, jp ?? null, -(overlay.jointTools?.offsetWidth ?? 160) / 2, -70);
     place(overlay.offerTools, st.jointOffer ? st.jointOffer.p : null, -(overlay.offerTools?.offsetWidth ?? 200) / 2, 24);
     const sb = (st.project.belts ?? []).find((q) => q.id === st.selected);
     const A = sb && st.mech.axisOf[sb.a], B = sb && st.mech.axisOf[sb.b];

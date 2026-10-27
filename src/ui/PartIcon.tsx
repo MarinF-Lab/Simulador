@@ -131,6 +131,26 @@ const SHAPES: Record<PartKind, ReactNode> = {
       {[10, 17, 24, 31].map((x) => <circle key={x} cx={x} cy="20" r="2" />)}
     </>
   ),
+  custom: (
+    <>
+      <path d="M6 30l4-20 14-4 10 12-6 14z" className="fill-muted/15" />
+      <circle cx="14" cy="20" r="1.8" />
+      <circle cx="24" cy="24" r="1.8" />
+    </>
+  ),
+  draw: (
+    <>
+      <path d="M6 30l6-18 16-4 6 14" strokeDasharray="3 2" />
+      {[[6, 30], [12, 12], [28, 8], [34, 22]].map(([x, y]) => <circle key={x} cx={x} cy={y} r="2.4" className="fill-accent/40" />)}
+    </>
+  ),
+  glue: (
+    <>
+      <rect x="4" y="22" width="16" height="10" rx="1" className="fill-muted/15" />
+      <rect x="20" y="22" width="16" height="10" rx="1" className="fill-muted/15" />
+      <path d="M20 21c-3-4-3-8 0-13 3 5 3 9 0 13z" className="fill-accent/40" />
+    </>
+  ),
   wheel: (
     <>
       <circle cx="20" cy="20" r="14" className="fill-muted/15" strokeWidth="4" />

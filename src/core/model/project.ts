@@ -2,6 +2,7 @@
 // Unidades en mm. El piso es el plano XY y Z es la altura.
 
 import { GRID_MM, snap } from "./units";
+import { bounds as shapeBounds, parseShape } from "./polygon";
 
 export type PropValue = number | string | boolean;
 export type Axis = "x" | "y" | "z";
@@ -49,10 +50,13 @@ export interface Belt {
   rope?: boolean;
 }
 
-/** Junta entre dos agujeros alineados: rotacional (gira) o fija (perno). */
+/**
+ * Junta entre dos agujeros alineados: rotacional (gira) o fija (perno).
+ * El pegamento (`glue`) une dos piezas que se tocan, sin agujeros: sus `h` son −1.
+ */
 export interface Joint {
   id: number;
-  kind: "revolute" | "fixed";
+  kind: "revolute" | "fixed" | "glue";
   a: { part: number; h: number };
   b: { part: number; h: number };
 }
@@ -78,7 +82,7 @@ export const SIZES: Record<string, Vec3> = {
   pulleyS: [20, 20, 12], pulleyM: [36, 36, 12], pulleyL: [56, 56, 12], belt: [100, 40, 6],
   bearing: [22, 22, 8], wheel: [60, 60, 14], piston: [110, 30, 66], support: [40, 20, 40], link: [100, 14, 6], joint: [30, 20, 20],
   profile60: [60, 10, 10], profile120: [120, 10, 10], profile240: [240, 10, 10],
-  plate: [160, 100, 6], bolt: [10, 10, 20], rope: [100, 6, 6], weight: [30, 30, 30], bracket: [60, 30, 40],
+  plate: [160, 100, 6], bolt: [10, 10, 20], rope: [100, 6, 6], weight: [30, 30, 30], custom: [80, 40, 6], draw: [40, 40, 6], glue: [20, 20, 10], bracket: [60, 30, 40],
   sensorAngle: [20, 20, 14], sensorContact: [20, 20, 14], meter: [40, 20, 50], text: [60, 4, 30],
 };
 
@@ -95,6 +99,14 @@ const num = (v: unknown): number | null => (typeof v === "number" && Number.isFi
 /** Tamaño de la pieza sin girar. Si la pieza tiene largo o ancho propio (props lx, ly), lo usa. */
 export function sizeOf(type: string, props?: Record<string, unknown>): Vec3 {
   const base = SIZES[type] ?? [40, 40, 20];
+  // Pieza libre: la caja de su forma y su grosor.
+  if (type === "custom") {
+    const pts = parseShape(props?.shape);
+    const h = Math.min(40, Math.max(2, num(props?.h) ?? base[2]));
+    if (!pts.length) return [base[0], base[1], h];
+    const b = shapeBounds(pts);
+    return [b.x1 - b.x0, b.y1 - b.y0, h];
+  }
   const r = RESIZABLE[type];
   if (!r || !props) return base;
   return [r.lx ? (num(props.lx) ?? base[0]) : base[0], r.ly ? (num(props.ly) ?? base[1]) : base[1], base[2]];
@@ -113,6 +125,14 @@ export function rotateLocal(v: Vec3, rot: Vec3): Vec3 {
   let out: Vec3 = [...v];
   const order: [Axis, number][] = [["z", rot[2]], ["y", rot[1]], ["x", rot[0]]];
   for (const [axis, n] of order) for (let i = 0; i < ((n % 4) + 4) % 4; i++) out = quarter(out, axis);
+  return out;
+}
+
+/** Deshace `rotateLocal`: pasa un vector de la mesa al marco local de la pieza. */
+export function unrotateLocal(v: Vec3, rot: Vec3): Vec3 {
+  let out: Vec3 = [...v];
+  const order: [Axis, number][] = [["x", rot[0]], ["y", rot[1]], ["z", rot[2]]];
+  for (const [axis, n] of order) for (let i = 0; i < (4 - (((n % 4) + 4) % 4)) % 4; i++) out = quarter(out, axis);
   return out;
 }
 
@@ -167,8 +187,12 @@ export function findFree(part: Part, others: Part[], cx: number, cy: number, gap
   return placeOnTable(part, cx, cy);
 }
 
+/** Forma inicial de una pieza libre: un rectángulo de 80 × 40 mm. */
+export const DEFAULT_SHAPE = "-40,-20;40,-20;40,20;-40,20";
+
 export function newPart(project: Project, type: string, x = 0, y = 0): Part {
-  return { id: project.nextId, type, x, y, z: 0, rot: [0, 0, 0], props: {} };
+  const props: Part["props"] = type === "custom" ? { shape: DEFAULT_SHAPE, h: 6, color: "Madera", holes: "Cada 10 mm" } : {};
+  return { id: project.nextId, type, x, y, z: 0, rot: [0, 0, 0], props };
 }
 
 /** Caja que encierra todas las piezas (para "Ajustar"). */

@@ -16,7 +16,7 @@ export const paletteDragging = () => active;
 export function startPaletteGesture(e: React.PointerEvent, type: string) {
   if (e.button > 0) return;
   // La correa no se arrastra: se elige y después se tocan dos poleas.
-  if (type === "belt" || type === "rope" || type === "bolt" || type === "joint") {
+  if (type === "belt" || type === "rope" || type === "bolt" || type === "joint" || type === "draw" || type === "glue") {
     const done = () => {
       useProject.getState().addNear(type, 0, 0);
       useUI.getState().openSheet(null);

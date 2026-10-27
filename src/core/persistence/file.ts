@@ -44,8 +44,10 @@ function belt(v: unknown, alive: Set<number>): Belt | null {
 }
 
 function joint(v: unknown, alive: Set<number>): Joint | null {
-  const ref = (r: unknown) => (isObj(r) && isId(r.part) && Number.isInteger(r.h) && (r.h as number) >= 0 && alive.has(r.part) ? { part: r.part, h: r.h as number } : null);
-  if (!isObj(v) || !isId(v.id) || (v.kind !== "revolute" && v.kind !== "fixed")) return null;
+  if (!isObj(v) || !isId(v.id) || (v.kind !== "revolute" && v.kind !== "fixed" && v.kind !== "glue")) return null;
+  // El pegamento no usa agujeros: su h es −1.
+  const minH = v.kind === "glue" ? -1 : 0;
+  const ref = (r: unknown) => (isObj(r) && isId(r.part) && Number.isInteger(r.h) && (r.h as number) >= minH && alive.has(r.part) ? { part: r.part, h: r.h as number } : null);
   const a = ref(v.a), b = ref(v.b);
   return a && b ? { id: v.id, kind: v.kind, a, b } : null;
 }

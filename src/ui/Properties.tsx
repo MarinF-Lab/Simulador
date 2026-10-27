@@ -519,23 +519,23 @@ function JointPanel({ id }: { id: number }) {
   return (
     <>
       <div className="flex items-center gap-3 rounded-xl border border-line bg-panel-2/60 p-3">
-        <PartIcon kind={joint.kind === "revolute" ? "joint" : "bolt"} className="size-10 text-ink/85" />
+        <PartIcon kind={joint.kind === "revolute" ? "joint" : joint.kind === "glue" ? "glue" : "bolt"} className="size-10 text-ink/85" />
         <div className="min-w-0 flex-1">
-          <p className="font-semibold">{joint.kind === "revolute" ? "Junta rotacional" : "Unión fija"}</p>
+          <p className="font-semibold">{joint.kind === "revolute" ? "Junta rotacional" : joint.kind === "glue" ? "Pegamento" : "Unión fija"}</p>
           <p className="text-xs text-muted">Une {nm(joint.a.part).toLowerCase()} con {nm(joint.b.part).toLowerCase()}</p>
         </div>
         <button onClick={() => remove(id)} aria-label="Eliminar junta" className="grid size-11 place-items-center rounded-lg text-muted hover:bg-panel hover:text-err">
           <Trash2 className="size-5" />
         </button>
       </div>
-      <WhatIsIt desc={findItem(joint.kind === "revolute" ? "joint" : "bolt")!.desc.replace(/^Herramienta: /, "")} />
-      <div className="flex gap-2">
+      <WhatIsIt desc={findItem(joint.kind === "revolute" ? "joint" : joint.kind === "glue" ? "glue" : "bolt")!.desc.replace(/^Herramienta: /, "")} />
+      {joint.kind !== "glue" && <div className="flex gap-2">
         {(["revolute", "fixed"] as const).map((k) => (
           <button key={k} onClick={() => setJointKind(id, k)} aria-pressed={joint.kind === k} className={"min-h-11 flex-1 rounded-lg border px-3 text-sm font-medium " + (joint.kind === k ? "border-accent bg-accent text-accent-ink" : "border-line")}>
             {k === "revolute" ? "Rotacional (gira)" : "Fija (perno)"}
           </button>
         ))}
-      </div>
+      </div>}
       <ComponentStatus id={id} />
     </>
   );

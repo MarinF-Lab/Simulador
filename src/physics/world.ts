@@ -10,7 +10,8 @@ import { holeAt } from "../core/model/holes";
 import type { Joint } from "../core/model/project";
 import { extent, rotateLocal, sizeOf, type Part, type Project, type Vec3 } from "../core/model/project";
 import { ROTORS, ropeDrop, rotorAxis } from "../core/mechanical/axes";
-import { checkStructure } from "../core/model/structure";
+import { parseShape, triangulate } from "../core/model/polygon";
+import { checkStructure, jointPoint } from "../core/model/structure";
 import { motorCurrent, motorParams, motorTorque, noLoadSpeed, type MotorParams } from "../core/coupling/dcmotor";
 import type { Issue } from "../core/electrical/circuit";
 import { atLimit, servoRamp } from "../core/coupling/control";
@@ -22,7 +23,11 @@ let ready: Promise<void> | null = null;
 export const initPhysics = (): Promise<void> => (ready ??= RAPIER.init());
 
 /** Densidad aproximada (kg/m³) según el tipo: los perfiles son huecos. */
-function density(type: string): number {
+/** Densidad del material de una pieza libre (kg/m³). */
+const CUSTOM_DENSITY: Record<string, number> = { Madera: 600, Aluminio: 2700, Acrílico: 1190, Cartón: 300 };
+
+function density(type: string, props: Record<string, unknown> = {}): number {
+  if (type === "custom") return CUSTOM_DENSITY[String(props.color)] ?? 600;
   if (type.startsWith("profile") || type === "link" || type === "plate" || type === "bracket") return 900;
   if (type === "dcmotor" || type === "stepper" || type === "servo") return 2500;
   if (type === "weight") return 7800;
@@ -45,6 +50,22 @@ function colliderShapes(part: Part): RAPIER.ColliderDesc[] {
     // El cilindro del pistón llega 6 mm por debajo del perno: la biela pasa por encima sin rozarlo.
     case "piston":
       return [box([sx / 2, sy / 2, sz / 2 - 3], [0, 0, -3])];
+    // Pieza libre: un prisma convexo por cada triángulo de su forma (sirve para formas cóncavas).
+    case "custom": {
+      const pts = parseShape(part.props.shape);
+      const tris = pts.length ? triangulate(pts) : [];
+      const out = tris.map((t) => {
+        const v = new Float32Array(18);
+        t.forEach((i, k) => {
+          for (const [s, z] of [[0, -sz / 2], [9, sz / 2]] as const) {
+            const w = rotateLocal([pts[i]![0], pts[i]![1], z], part.rot);
+            v.set([w[0] * S, w[1] * S, w[2] * S], s + 3 * k);
+          }
+        });
+        return RAPIER.ColliderDesc.convexHull(v);
+      }).filter((d): d is RAPIER.ColliderDesc => d !== null);
+      return out.length ? out : [box([sx / 2, sy / 2, sz / 2])];
+    }
     // La escuadra es una L: la base y el ala, sin llenar el hueco entre ellas.
     case "bracket":
       return [box([sx / 2, sy / 2, 2], [0, 0, -sz / 2 + 2]), box([sx / 2, 2, sz / 2], [0, -sy / 2 + 2, 0])];
@@ -211,9 +232,11 @@ export class Sim {
         if (kin.has(other) || typeOf.get(other) === "plate") continue;
         const e = servoEdge(j);
         if (e && e.parent === id) { edges.push({ ...e, joint: j.id, servo: true }); kin.add(other); queue.push(other); continue; }
-        if (j.kind === "fixed" && !e) {
-          const h = holeAt(project, j.a)!;
-          edges.push({ parent: id, child: other, joint: j.id, servo: false, pivot: h.p as Vec3, axis: [0, 0, 1] });
+        if ((j.kind === "fixed" || j.kind === "glue") && !e) {
+          // Unión fija o pegamento: el hijo va pegado al padre (sin giro, el pivote no importa).
+          const pivot = jointPoint(project, j);
+          if (!pivot) continue;
+          edges.push({ parent: id, child: other, joint: j.id, servo: false, pivot, axis: [0, 0, 1] });
           kin.add(other);
           queue.push(other);
         }
@@ -243,7 +266,7 @@ export class Sim {
       const body = this.world.createRigidBody(desc);
       // Una pieza puede tener varios colisionadores (la escuadra es una L); todos llevan a la pieza.
       colliderShapes(part).forEach((shape, i) => {
-        const col = this.world.createCollider(shape.setDensity(density(part.type)).setFriction(part.type === "wheel" ? 1.2 : 0.7), body);
+        const col = this.world.createCollider(shape.setDensity(density(part.type, part.props)).setFriction(part.type === "wheel" ? 1.2 : 0.7), body);
         this.partOf.set(col.handle, part.id);
         if (i === 0 && part.type === "sensorContact") this.sensors.push({ id: part.id, collider: col, ignore: new Set() });
       });
@@ -301,6 +324,17 @@ export class Sim {
       if (broken.has(j.id) || kinJoint.has(j.id)) continue;
       // Lo que se une a un pistón se une a su émbolo.
       const A = this.sliders.get(j.a.part)?.body ?? this.bodies.get(j.a.part), B = this.sliders.get(j.b.part)?.body ?? this.bodies.get(j.b.part);
+      // Pegamento: unión fija en el centro del contacto.
+      if (j.kind === "glue") {
+        const spot = jointPoint(project, j);
+        if (!A || !B || !spot) continue;
+        const pa = this.start.get(j.a.part)!, pb = this.start.get(j.b.part)!;
+        const la = { x: (spot[0] - pa[0]) * S, y: (spot[1] - pa[1]) * S, z: (spot[2] - pa[2]) * S };
+        const lb = { x: (spot[0] - pb[0]) * S, y: (spot[1] - pb[1]) * S, z: (spot[2] - pb[2]) * S };
+        const g = this.world.createImpulseJoint(RAPIER.JointData.fixed(la, { x: 0, y: 0, z: 0, w: 1 }, lb, { x: 0, y: 0, z: 0, w: 1 }), A, B, true);
+        g.setContactsEnabled(false);
+        continue;
+      }
       const ha = holeAt(project, j.a), hb = holeAt(project, j.b);
       if (!A || !B || !ha || !hb) continue;
       const pa = this.start.get(j.a.part)!, pb = this.start.get(j.b.part)!;

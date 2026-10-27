@@ -259,3 +259,27 @@ describe("placa de control del ejemplo", () => {
     sim.free();
   });
 });
+
+describe("molino del ejemplo", () => {
+  it("las aspas pegadas giran con el disco", async () => {
+    const { EXAMPLES } = await import("../core/persistence/examples");
+    const { analyze } = await import("../core/electrical/analyze");
+    const { checkStructure } = await import("../core/model/structure");
+    const project = EXAMPLES.find((e) => e.id === "windmill")!.build();
+    expect(checkStructure(project).issues).toEqual([]);
+    const c = analyze(project);
+    const sim = new Sim(project);
+    const props = (id: number) => project.parts.find((p) => p.id === id)?.props ?? {};
+    const angle = () => { const p = sim.poses().get(4)!.p; return Math.atan2(p[1], p[0]); };
+    const a0 = angle(), d0 = Math.hypot(...(sim.poses().get(4)!.p.slice(0, 2) as [number, number]));
+    run(sim, 0.5, (id) => c.readings[id]?.v ?? 0, props);
+    let da = angle() - a0;
+    while (da < -Math.PI) da += 2 * Math.PI;
+    while (da > Math.PI) da -= 2 * Math.PI;
+    // 30 RPM: media vuelta por segundo, unos 90° en 0,5 s. El aspa sigue a la misma distancia del eje.
+    expect(Math.abs(da)).toBeGreaterThan((60 * Math.PI) / 180);
+    expect(Math.hypot(...(sim.poses().get(4)!.p.slice(0, 2) as [number, number]))).toBeCloseTo(d0, 0);
+    expect(sim.poses().get(4)!.p[2]).toBeGreaterThan(60);
+    sim.free();
+  });
+});

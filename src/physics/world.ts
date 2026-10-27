@@ -50,6 +50,9 @@ function colliderShapes(part: Part): RAPIER.ColliderDesc[] {
     // El cilindro del pistón llega 6 mm por debajo del perno: la biela pasa por encima sin rozarlo.
     case "piston":
       return [box([sx / 2, sy / 2, sz / 2 - 3], [0, 0, -3])];
+    // Engranajes y poleas: un disco (cilindro) del ancho de la pieza.
+    case "gear10": case "gear20": case "gear40": case "pulleyS": case "pulleyM": case "pulleyL":
+      return [RAPIER.ColliderDesc.cylinder((sz / 2) * S, (sx / 2) * S).setRotation(rot(qmul(q, [Math.SQRT1_2, 0, 0, Math.SQRT1_2])))];
     // Pieza libre: un prisma convexo por cada triángulo de su forma (sirve para formas cóncavas).
     case "custom": {
       const pts = parseShape(part.props.shape);
@@ -183,6 +186,18 @@ export class Sim {
   /** Émbolo de cada pistón: un cuerpo propio que se desliza en el cilindro. */
   private sliders = new Map<number, { body: RAPIER.RigidBody; axis: Vec3 }>();
   private ropes: Rope[] = [];
+  /** Engranajes, poleas y ejes: cuerpos cinemáticos que giran según el tren de transmisión. */
+  private rotors: { id: number; body: RAPIER.RigidBody; axis: Vec3; theta: number }[] = [];
+  /** Pares de piezas que se atraviesan al empezar (una gira dentro de la otra): no chocan. */
+  private noContact = new Set<string>();
+  private hooks: RAPIER.PhysicsHooks = {
+    filterContactPair: (c1, c2) => {
+      const a = this.partOf.get(c1), b = this.partOf.get(c2);
+      if (a !== undefined && b !== undefined && this.noContact.has(a < b ? `${a}:${b}` : `${b}:${a}`)) return null;
+      return RAPIER.SolverFlags.COMPUTE_IMPULSE;
+    },
+    filterIntersectionPair: () => true,
+  };
   private table!: RAPIER.RigidBody;
   private acc = 0;
   private fallen = new Set<number>();
@@ -222,14 +237,14 @@ export class Sim {
     const queue: number[] = [];
     for (const j of okJoints) {
       const e = servoEdge(j);
-      if (e && !kin.has(e.child)) { edges.push({ ...e, joint: j.id, servo: true }); kin.add(e.child); queue.push(e.child); }
+      if (e && !kin.has(e.child) && !ROTORS[typeOf.get(e.child) ?? ""]) { edges.push({ ...e, joint: j.id, servo: true }); kin.add(e.child); queue.push(e.child); }
     }
     while (queue.length) {
       const id = queue.shift()!;
       for (const j of okJoints) {
         if (j.a.part !== id && j.b.part !== id) continue;
         const other = j.a.part === id ? j.b.part : j.a.part;
-        if (kin.has(other) || typeOf.get(other) === "plate") continue;
+        if (kin.has(other) || typeOf.get(other) === "plate" || ROTORS[typeOf.get(other) ?? ""]) continue;
         const e = servoEdge(j);
         if (e && e.parent === id) { edges.push({ ...e, joint: j.id, servo: true }); kin.add(other); queue.push(other); continue; }
         if ((j.kind === "fixed" || j.kind === "glue") && !e) {
@@ -254,24 +269,39 @@ export class Sim {
     const anchored = (p: Part | undefined) => !!p && p.type === "plate" && p.props.anchored !== false;
 
     for (const part of project.parts) {
-      // Engranajes, poleas y ejes siguen el cálculo de transmisiones: no son cuerpos libres.
-      if (ROTORS[part.type]) continue;
+      // Engranajes, poleas y ejes giran según el cálculo de transmisiones: son cuerpos cinemáticos.
+      const rotor = !!ROTORS[part.type];
       const ez = extent(part)[2];
       const c: Vec3 = [part.x, part.y, part.z + ez / 2];
       // La placa base queda anclada a la mesa, salvo que se suelte para usarla como chasis. Lo que
       // se apoya en una placa anclada queda fijo como ella (más estable que unirlo con una junta).
       const fixed = anchored(part) || (!ROTORS[part.type] && anchored(restOn(part)));
-      const base = fixed ? RAPIER.RigidBodyDesc.fixed() : kin.has(part.id) ? RAPIER.RigidBodyDesc.kinematicPositionBased() : RAPIER.RigidBodyDesc.dynamic();
+      const base = fixed ? RAPIER.RigidBodyDesc.fixed() : kin.has(part.id) || rotor ? RAPIER.RigidBodyDesc.kinematicPositionBased() : RAPIER.RigidBodyDesc.dynamic();
       const desc = base.setTranslation(c[0] * S, c[1] * S, c[2] * S);
       const body = this.world.createRigidBody(desc);
       // Una pieza puede tener varios colisionadores (la escuadra es una L); todos llevan a la pieza.
       colliderShapes(part).forEach((shape, i) => {
+        if (rotor) shape.setActiveHooks(RAPIER.ActiveHooks.FILTER_CONTACT_PAIRS);
         const col = this.world.createCollider(shape.setDensity(density(part.type, part.props)).setFriction(part.type === "wheel" ? 1.2 : 0.7), body);
         this.partOf.set(col.handle, part.id);
         if (i === 0 && part.type === "sensorContact") this.sensors.push({ id: part.id, collider: col, ignore: new Set() });
       });
       this.bodies.set(part.id, body);
       this.start.set(part.id, c);
+      const ax = rotor ? rotorAxis(part) : null;
+      if (ax) this.rotors.push({ id: part.id, body, axis: ax.a as Vec3, theta: 0 });
+    }
+
+    // Lo que gira dentro de otra pieza al empezar (un engranaje en el eje de un motor, un eje que
+    // atraviesa un soporte) no choca con ella.
+    const box = (p: Part) => { const e = extent(p); return [[p.x - e[0] / 2, p.x + e[0] / 2], [p.y - e[1] / 2, p.y + e[1] / 2], [p.z, p.z + e[2]]]; };
+    for (const r of project.parts.filter((p) => ROTORS[p.type])) {
+      const R = box(r);
+      for (const o of project.parts) {
+        if (o.id === r.id || ROTORS[o.type]) continue;
+        const O = box(o);
+        if (R.every(([a0, a1], k) => Math.min(a1!, O[k]![1]!) - Math.max(a0!, O[k]![0]!) > 0.5)) this.noContact.add(r.id < o.id ? `${r.id}:${o.id}` : `${o.id}:${r.id}`);
+      }
     }
 
     // Émbolos: un cuerpo que se desliza a lo largo del cilindro, desde el perno hacia atrás.
@@ -309,7 +339,7 @@ export class Sim {
     for (const part of project.parts) {
       const plate = restOn(part);
       const P0 = plate && this.bodies.get(plate.id), B = this.bodies.get(part.id);
-      if (!plate || anchored(plate) || !P0 || !B) continue;
+      if (!plate || anchored(plate) || !P0 || !B || ROTORS[part.type]) continue;
       {
         const a = this.start.get(plate.id)!, b = this.start.get(part.id)!;
         const anchor = { x: (b[0] - a[0]) * S, y: (b[1] - a[1]) * S, z: (b[2] - a[2]) * S };
@@ -337,6 +367,9 @@ export class Sim {
       }
       const ha = holeAt(project, j.a), hb = holeAt(project, j.b);
       if (!A || !B || !ha || !hb) continue;
+      // Entre piezas que giran, o de una de ellas en el eje de un motor, manda el tren de transmisión.
+      const ra = !!ROTORS[typeOf.get(j.a.part) ?? ""], rb = !!ROTORS[typeOf.get(j.b.part) ?? ""];
+      if ((ra && rb) || ((ra || rb) && (ha.shaft || hb.shaft))) continue;
       const pa = this.start.get(j.a.part)!, pb = this.start.get(j.b.part)!;
       const la = { x: (ha.p[0] - pa[0]) * S, y: (ha.p[1] - pa[1]) * S, z: (ha.p[2] - pa[2]) * S };
       const lb = { x: (ha.p[0] - pb[0]) * S, y: (ha.p[1] - pb[1]) * S, z: (ha.p[2] - pb[2]) * S };
@@ -398,10 +431,20 @@ export class Sim {
       for (const d of this.drives) this.drive(d, env);
       this.kinematics(env);
       this.reel(env);
-      this.world.step();
+      this.spin(env);
+      this.world.step(undefined, this.hooks);
       this.acc -= STEP;
       this.t += STEP;
       n++;
+    }
+  }
+
+  /** Gira engranajes, poleas y ejes al ángulo que llevan según su RPM. */
+  private spin(env: SimEnv): void {
+    for (const r of this.rotors) {
+      r.theta = (r.theta + ((env.rpm?.(r.id) ?? 0) / 60) * 2 * Math.PI * STEP) % (2 * Math.PI);
+      const h = r.theta / 2, s = Math.sin(h);
+      r.body.setNextKinematicRotation({ x: r.axis[0] * s, y: r.axis[1] * s, z: r.axis[2] * s, w: Math.cos(h) });
     }
   }
 
@@ -511,7 +554,9 @@ export class Sim {
 
   poses(): Map<number, Pose> {
     const out = new Map<number, Pose>();
+    const spinning = new Set(this.rotors.map((r) => r.id));
     for (const [id, b] of this.bodies) {
+      if (spinning.has(id)) continue;
       const t = b.translation(), r = b.rotation();
       out.set(id, { p: [t.x / S, t.y / S, t.z / S], q: [r.x, r.y, r.z, r.w] });
     }

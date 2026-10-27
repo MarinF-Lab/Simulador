@@ -3,6 +3,7 @@ import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { DEFAULT_SHAPE, sizeOf } from "../core/model/project";
 import { gridInside, parseShape } from "../core/model/polygon";
+import { ROTOR_HOLES } from "../core/model/holes";
 
 // Modelos 3D simples de cada pieza. Cada modelo se arma con la base en z = 0 y centrado
 // en x, y; el contenedor lo baja a la mitad de su alto para que gire sobre su centro.
@@ -74,25 +75,38 @@ function gearGeometry(teeth: number, r: number, h: number): THREE.ExtrudeGeometr
   return g;
 }
 
+/** Agujeros de la cara (los mismos de holes.ts), para ver dónde se puede unir una pieza. */
+function RotorHoles({ type, h }: { type: string; h: number }) {
+  return (
+    <>
+      {(ROTOR_HOLES[type] ?? []).map(([x, y], i) => <Cyl key={i} r={2.6} h={h + 0.8} p={[x, y, -0.4]} m={M.hole} seg={12} />)}
+    </>
+  );
+}
+
 function Gear({ teeth }: { teeth: number }) {
   const r = teeth; // módulo 2: radio primitivo = dientes mm
   const geo = useMemo(() => gearGeometry(teeth, r, 8), [teeth, r]);
+  const type = `gear${teeth}`;
   return (
     <group>
       <mesh geometry={geo} material={M.steel} castShadow receiveShadow />
-      <Cyl r={Math.max(5, r * 0.3)} h={9} p={[0, 0, -0.5]} m={M.dark} />
-      <Cyl r={2} h={8.8} p={[r * 0.7, 0, -0.4]} m={M.copper} seg={12} />
+      <Cyl r={Math.max(5, r * 0.3)} h={8.6} p={[0, 0, -0.3]} m={M.dark} />
+      <RotorHoles type={type} h={8} />
+      {/* Marca para ver el giro en los engranajes chicos, que solo tienen el agujero del centro. */}
+      {(ROTOR_HOLES[type]?.length ?? 0) < 2 && <Cyl r={2} h={8.8} p={[r * 0.7, 0, -0.4]} m={M.copper} seg={12} />}
     </group>
   );
 }
 
 function Pulley({ r }: { r: number }) {
+  const type = r <= 10 ? "pulleyS" : r <= 18 ? "pulleyM" : "pulleyL";
   return (
     <group>
       <Cyl r={r} h={3} m={M.steel} />
       <Cyl r={r - 3} h={6} p={[0, 0, 3]} m={M.copper} />
       <Cyl r={r} h={3} p={[0, 0, 9]} m={M.steel} />
-      <Cyl r={2.5} h={12.4} p={[0, 0, -0.2]} m={M.hole} seg={12} />
+      <RotorHoles type={type} h={12} />
     </group>
   );
 }

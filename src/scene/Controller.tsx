@@ -179,6 +179,15 @@ export function Controller() {
     return null;
   };
 
+  /** Punto de la superficie de una pieza bajo el dedo. */
+  const partPoint = (cx: number, cy: number): Vec3 | null => {
+    const r = rect();
+    ray.current.setFromCamera(new THREE.Vector2(((cx - r.left) / r.width) * 2 - 1, -((cy - r.top) / r.height) * 2 + 1), cam);
+    const g = scene.getObjectByName("parts");
+    const hit = g ? ray.current.intersectObjects(g.children, true)[0] : undefined;
+    return hit ? [hit.point.x, hit.point.y, hit.point.z] : null;
+  };
+
   const tmpV = new THREE.Vector3();
   const toScreen = (p: Vec3) => {
     const r = rect();
@@ -515,8 +524,10 @@ export function Controller() {
       } else if (!cancel) {
         const now = performance.now();
         if (P().jointTool) {
+          // El punto tocado sobre la pieza (su cara), para elegir el agujero de esa cara.
+          const hp = partPoint(e.clientX, e.clientY);
           const g2 = ground(e.clientX, e.clientY);
-          P().jointTap(d.id, g2 ? [g2.x, g2.y, g2.z] : [0, 0, 0]);
+          P().jointTap(d.id, hp ?? (g2 ? [g2.x, g2.y, g2.z] : [0, 0, 0]));
         } else if (P().beltMode) {
           P().beltTap(d.id);
         } else if (P().glueMode) {

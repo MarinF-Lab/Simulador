@@ -36,6 +36,17 @@ function grid(from: number, to: number, step: number): number[] {
   return out;
 }
 
+/** Agujeros en la cara de engranajes y poleas (mm locales): el centro y un anillo para montar piezas. */
+const ring = (n: number, r: number): [number, number][] => Array.from({ length: n }, (_, i) => [Math.round(r * Math.cos((i * 2 * Math.PI) / n) * 10) / 10, Math.round(r * Math.sin((i * 2 * Math.PI) / n) * 10) / 10]);
+export const ROTOR_HOLES: Record<string, [number, number][]> = {
+  gear10: [[0, 0]],
+  gear20: [[0, 0], ...ring(4, 12)],
+  gear40: [[0, 0], ...ring(6, 25)],
+  pulleyS: [[0, 0]],
+  pulleyM: [[0, 0], ...ring(4, 9)],
+  pulleyL: [[0, 0], ...ring(4, 16)],
+};
+
 const cache = new Map<string, LocalHole[]>();
 
 function localHoles(part: Pick<Part, "type" | "props">): LocalHole[] {
@@ -80,6 +91,9 @@ function localHoles(part: Pick<Part, "type" | "props">): LocalHole[] {
       out = step ? through(gridInside(parseShape(part.props.shape), step), h) : [];
       break;
     }
+    case "gear10": case "gear20": case "gear40": case "pulleyS": case "pulleyM": case "pulleyL":
+      out = through(ROTOR_HOLES[part.type]!, h);
+      break;
     case "bearing":
     case "wheel":
       out = through([[0, 0]], h);
@@ -146,6 +160,25 @@ export function alignedPairs(project: Pick<Project, "parts">, id: number): { a: 
     }));
   }
   return out;
+}
+
+/** Agujero de la pieza más cercano a un punto; con `facing`, solo los de cara opuesta a esa normal. */
+export function nearestHole(part: Part, at: Vec3, facing?: Vec3): number {
+  let best = -1, bd = Infinity;
+  holesOf(part).forEach((h, i) => {
+    if (facing && h.n[0] * facing[0] + h.n[1] * facing[1] + h.n[2] * facing[2] > -0.99) return;
+    const d = Math.hypot(h.p[0] - at[0], h.p[1] - at[1], h.p[2] - at[2]);
+    if (d < bd) { bd = d; best = i; }
+  });
+  return best;
+}
+
+/** Posición de `moving` para que su agujero h quede justo sobre `target` (con caras opuestas). */
+export function alignTo(moving: Part, h: number, target: Hole): { x: number; y: number; z: number } | null {
+  const mine = holesOf(moving)[h];
+  if (!mine || mine.n[0] * target.n[0] + mine.n[1] * target.n[1] + mine.n[2] * target.n[2] > -0.99) return null;
+  const r = (v: number) => Math.round(v * 10) / 10;
+  return { x: r(moving.x + target.p[0] - mine.p[0]), y: r(moving.y + target.p[1] - mine.p[1]), z: r(moving.z + target.p[2] - mine.p[2]) };
 }
 
 export function holeAt(project: Pick<Project, "parts">, r: HoleRef): Hole | null {

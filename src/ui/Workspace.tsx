@@ -64,6 +64,8 @@ export function Workspace() {
   const glue = useProject((s) => s.glueMode);
   const { shapeMode, setShapeMode, selVertex, removeVertex, drawUndo, drawCancel, drawFinish } = useProject();
 
+  const jointFirst = useProject((s) => s.jointFirst);
+  const jointMsg = useProject((s) => s.jointMsg);
   const hint = draw
     ? draw.msg ?? (draw.pts.length === 0
       ? "Toca la mesa para poner el primer vértice de la pieza. Puedes mover la vista arrastrando."
@@ -75,7 +77,9 @@ export function Workspace() {
     : type === "custom" && shapeMode === "edit" && !running
     ? "Arrastra los puntos blancos (vértices) o los cuadrados (lados). Toca un cuadrado para agregar un vértice; toca un vértice para elegirlo y quitarlo."
     : jointTool
-    ? `Toca una pieza que tenga un agujero alineado con otra para poner ${jointTool === "fixed" ? "una unión fija" : "una junta rotacional"}. Toca el fondo para cancelar.`
+    ? jointMsg ?? (jointFirst
+      ? "Ahora toca la otra pieza, cerca del agujero que quieres unir: se moverá sola hasta que los agujeros coincidan."
+      : `${jointTool === "fixed" ? "Unión fija" : "Junta rotacional"}: toca la primera pieza cerca de uno de sus agujeros (anillos índigo). Toca el fondo para cancelar.`)
     : offer
     ? offer.shaft
       ? "La pieza quedó sobre el eje del motor: móntala para que gire con él."

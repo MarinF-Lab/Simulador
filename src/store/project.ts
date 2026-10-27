@@ -6,7 +6,7 @@ import { detachFrom, endPos, posKey, reattach, termWorld } from "../core/model/t
 import { snapRotor } from "../core/mechanical/snap";
 import { isRotor } from "../core/mechanical/axes";
 import { solveTrain, type Train } from "../core/mechanical/train";
-import { alignedPairs, restHeight, snapHoles, type HoleRef } from "../core/model/holes";
+import { alignedPairs, alignTo, holeAt, holesOf, nearestHole, restHeight, snapHoles, type HoleRef } from "../core/model/holes";
 import { checkStructure, contactSpot, type StructureCheck } from "../core/model/structure";
 import { centered, isSimple, parseShape, shapeText, type Pt } from "../core/model/polygon";
 import type { Joint } from "../core/model/project";
@@ -79,6 +79,9 @@ interface ProjectState {
   jointOffer: JointOffer | null;
   /** Poniendo una unión o una junta desde la biblioteca. */
   jointTool: Joint["kind"] | null;
+  /** Agujero de la primera pieza tocada con la herramienta, y un aviso si algo no se pudo. */
+  jointFirst: HoleRef | null;
+  jointMsg: string | null;
   acceptJoint: (kind: Joint["kind"]) => void;
   dismissJoint: () => void;
   /** Toque en una pieza con la herramienta Unión o Junta rotacional. */
@@ -212,19 +215,60 @@ export const useProject = create<ProjectState>((set, get) => {
     },
     dismissJoint: () => set({ jointOffer: null }),
     load: (project) =>
-      set({ project, history: emptyHistory(), selected: null, dragging: null, dragFrom: null, pending: null, jointOffer: null, jointTool: null, beltMode: null, pressed: {}, drawMode: null, glueMode: null, selVertex: null, shapeFrom: null }),
+      set({ project, history: emptyHistory(), selected: null, dragging: null, dragFrom: null, pending: null, jointOffer: null, jointTool: null, beltMode: null, pressed: {}, drawMode: null, glueMode: null, selVertex: null, shapeFrom: null, jointFirst: null, jointMsg: null }),
+    jointFirst: null,
+    jointMsg: null,
     jointTap: (id, at) => {
       const s = get();
       const kind = s.jointTool;
       if (!kind) return;
       const taken = new Set((s.project.joints ?? []).flatMap((j) => [`${j.a.part}:${j.a.h}`, `${j.b.part}:${j.b.h}`]));
-      const pairs = alignedPairs(s.project, id).filter((q) => !taken.has(`${q.a.part}:${q.a.h}`) && !taken.has(`${q.b.part}:${q.b.h}`));
-      if (!pairs.length) { set({ selected: id }); return; }
-      const d = (p: Vec3) => Math.hypot(p[0] - at[0], p[1] - at[1], p[2] - at[2]);
-      const best = pairs.reduce((m, q) => (d(q.p) < d(m.p) ? q : m));
+      const me = part(id);
+      if (!me) return;
+      const done = (cmds: Command[], jid: number) => {
+        commit(cmds.length > 1 ? { kind: "batch", cmds } : cmds[0]!);
+        set({ jointTool: null, jointFirst: null, jointMsg: null, selected: jid });
+      };
+      const first = s.jointFirst;
+      if (!first || first.part === id) {
+        // Primer toque: si ya hay un agujero alineado con otra pieza cerca del toque, se une de una vez.
+        const d = (p: Vec3) => Math.hypot(p[0] - at[0], p[1] - at[1], p[2] - at[2]);
+        const pairs = alignedPairs(s.project, id).filter((q) => !taken.has(`${q.a.part}:${q.a.h}`) && !taken.has(`${q.b.part}:${q.b.h}`) && d(q.p) < 25);
+        if (pairs.length && !first) {
+          const best = pairs.reduce((m, q) => (d(q.p) < d(m.p) ? q : m));
+          done([{ kind: "addJoint", joint: { id: s.project.nextId, kind, a: best.a, b: best.b } }], s.project.nextId);
+          return;
+        }
+        const h = nearestHole(me, at);
+        if (h < 0) {
+          set({ jointMsg: "Esta pieza no tiene agujeros. Para unirla igual, usa Pegamento.", selected: id });
+          return;
+        }
+        set({ jointFirst: { part: id, h }, jointMsg: null, selected: id });
+        return;
+      }
+      // Segundo toque: el agujero de cara opuesta más cercano, y una de las dos piezas se mueve sola.
+      const other = part(first.part), target = holeAt(s.project, first);
+      if (!other || !target) { set({ jointFirst: null }); return; }
+      const hb = nearestHole(me, at, target.n);
+      if (hb < 0) {
+        set({ jointMsg: holesOf(me).length ? "Los agujeros de estas piezas no quedan paralelos: gira una (botón ⟳) para que miren igual y vuelve a intentarlo." : "Esta pieza no tiene agujeros. Para unirla igual, usa Pegamento." });
+        return;
+      }
+      // Se mueve la segunda pieza, salvo que sea una base, un motor o algo que gira en un eje.
+      const anchorLike = (p: Part) => p.type === "plate" || isRotor(p.type) || p.type === "dcmotor" || p.type === "stepper" || p.type === "servo";
+      const moveFirst = anchorLike(me) && !anchorLike(other);
+      const mover = moveFirst ? other : me;
+      const pos = moveFirst ? alignTo(other, first.h, holesOf(me)[hb]!) : alignTo(me, hb, target);
+      if (!pos) return;
+      if (pos.z < -0.01) {
+        set({ jointMsg: "Así quedaría bajo la mesa: sube la otra pieza (Altura en Propiedades) y vuelve a intentarlo." });
+        return;
+      }
       const jid = s.project.nextId;
-      commit({ kind: "addJoint", joint: { id: jid, kind, a: best.a, b: best.b } });
-      set({ jointTool: null, selected: jid });
+      const move = updateCmd(s.project, mover.id, { x: pos.x, y: pos.y, z: Math.max(0, pos.z) });
+      const joint: Command = { kind: "addJoint", joint: { id: jid, kind, a: first, b: { part: id, h: hb } } };
+      done(move ? [move, joint] : [joint], jid);
     },
     setJointKind: (id, kind) => {
       const j = (get().project.joints ?? []).find((x) => x.id === id);
@@ -256,7 +300,7 @@ export const useProject = create<ProjectState>((set, get) => {
       const b = (get().project.belts ?? []).find((x) => x.id === id);
       if (b) commit({ kind: "updateBelt", id, before: b.cross, after: !b.cross });
     },
-    select: (selected) => set({ selected, pending: null, beltMode: null, jointTool: null, jointOffer: null, glueMode: null, selVertex: null }),
+    select: (selected) => set({ selected, pending: null, beltMode: null, jointTool: null, jointFirst: null, jointMsg: null, jointOffer: null, glueMode: null, selVertex: null }),
     setRotAxis: (rotAxis) => set({ rotAxis }),
     run: commit,
 
@@ -275,7 +319,7 @@ export const useProject = create<ProjectState>((set, get) => {
         return -1;
       }
       if (type === "bolt" || type === "joint") {
-        set({ jointTool: type === "bolt" ? "fixed" : "revolute", beltMode: null, selected: null, pending: null });
+        set({ jointTool: type === "bolt" ? "fixed" : "revolute", jointFirst: null, jointMsg: null, beltMode: null, glueMode: null, drawMode: null, selected: null, pending: null });
         return -1;
       }
       if (type === "wire") {

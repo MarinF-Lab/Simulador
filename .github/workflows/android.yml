@@ -1,0 +1,56 @@
+name: App de Android (APK)
+# Arma el APK de KINETIC en cada cambio a main y lo deja en el release "app",
+# así el link .../releases/latest/download/kinetic.apk siempre baja el último.
+# En los PR solo se arma, para comprobar que compila; se publica al llegar a main.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - run: npx cap sync android
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Armar el APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+          cp app/build/outputs/apk/debug/app-debug.apk ../kinetic.apk
+      - name: Guardar el APK del PR
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: kinetic-apk
+          path: kinetic.apk
+      - name: Publicar en el release "app"
+        if: github.event_name != 'pull_request'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: app
+          name: KINETIC para Android
+          make_latest: "true"
+          files: kinetic.apk
+          body: |
+            App de KINETIC para Android, armada automáticamente desde main (versión 1.0.${{ github.run_number }}).
+
+            Para instalar: descarga kinetic.apk desde el celular, ábrelo y, si Android lo pide, permite "Instalar apps desconocidas" para tu navegador. Las versiones nuevas se instalan encima de la anterior.

@@ -1,11 +1,12 @@
 import { useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ClipboardCopy, ClipboardPaste, Download, FilePlus2, FolderOpen, X } from "lucide-react";
+import { ClipboardCopy, ClipboardPaste, Download, FilePlus2, FolderOpen, MonitorDown, Smartphone, X } from "lucide-react";
 import type { Project } from "../core/model/project";
 import { EXAMPLES } from "../core/persistence/examples";
 import { parseProject, serialize } from "../core/persistence/file";
 import { sceneApi } from "../scene/api";
 import { useSave } from "../store/autosave";
+import { APK_URL, install, useInstall } from "../store/install";
 import { useProject } from "../store/project";
 import { useRecord } from "../store/record";
 import { useUI } from "../store/ui";
@@ -36,6 +37,9 @@ function apply(project: Project) {
 /** Menú Proyecto: guardado, exportar e importar, ejemplos y mesa vacía. */
 export function ProjectMenu({ onClose }: { onClose: () => void }) {
   const save = useSave();
+  const canInstall = useInstall((s) => s.prompt !== null);
+  const installed = useInstall((s) => s.installed);
+  const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
   const [confirm, setConfirm] = useState<{ name: string; project: Project } | null>(null);
   const [msg, setMsg] = useState<{ text: string; err?: boolean } | null>(null);
   const [paste, setPaste] = useState<string | null>(null);
@@ -147,6 +151,28 @@ export function ProjectMenu({ onClose }: { onClose: () => void }) {
               </div>
             )}
           </section>
+
+          {!installed && (
+            <section className="space-y-2">
+              <h3 className="text-xs font-semibold tracking-wide text-muted uppercase">App</h3>
+              {canInstall && (
+                <button className={row} onClick={() => void install().then((ok) => ok && setMsg({ text: "KINETIC quedó instalada: búscala entre tus apps." }))}>
+                  <MonitorDown className="size-5 text-accent" aria-hidden="true" />Instalar app
+                </button>
+              )}
+              <a className={row} href={APK_URL} target="_blank" rel="noopener">
+                <Smartphone className="size-5 text-accent" aria-hidden="true" />Descargar para Android (APK)
+              </a>
+              <p className="text-xs text-muted">
+                {canInstall
+                  ? "Instalar app la deja en tu pantalla de inicio y funciona sin internet."
+                  : ios
+                    ? "En iPhone: toca Compartir y luego Agregar a inicio para instalarla."
+                    : "Para instalarla desde Chrome: abre esta página en el link de GitHub Pages y usa ⋮ → Instalar app."}{" "}
+                El APK se instala aparte: Android pide permitir apps de origen desconocido.
+              </p>
+            </section>
+          )}
 
           <section className="space-y-2">
             <h3 className="text-xs font-semibold tracking-wide text-muted uppercase">Ejemplos</h3>

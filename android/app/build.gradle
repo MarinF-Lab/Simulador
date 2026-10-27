@@ -1,0 +1,73 @@
+apply plugin: 'com.android.application'
+
+// Número de la ejecución de GitHub Actions (1 al compilar en un computador).
+def runNumber = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInteger()
+
+android {
+    namespace "cl.marinflab.kinetic"
+    compileSdk rootProject.ext.compileSdkVersion
+    defaultConfig {
+        applicationId "cl.marinflab.kinetic"
+        minSdkVersion rootProject.ext.minSdkVersion
+        targetSdkVersion rootProject.ext.targetSdkVersion
+        // Cada APK que arma GitHub sube de versión, para instalarse encima del anterior.
+        versionCode runNumber
+        versionName "1.0.${runNumber}"
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        aaptOptions {
+             // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
+             // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
+            ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
+        }
+    }
+    // Firma fija, guardada en el repo: así cada APK nuevo se instala encima del anterior sin
+    // desinstalar. Es una firma de prueba (pública), no para publicar en Google Play.
+    signingConfigs {
+        kinetic {
+            storeFile file("kinetic-debug.p12")
+            storeType "pkcs12"
+            storePassword "kinetic-debug"
+            keyAlias "kinetic"
+            keyPassword "kinetic-debug"
+        }
+    }
+    buildTypes {
+        debug {
+            signingConfig signingConfigs.kinetic
+        }
+        release {
+            signingConfig signingConfigs.kinetic
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+        }
+    }
+}
+
+repositories {
+    flatDir{
+        dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs'
+    }
+}
+
+dependencies {
+    implementation fileTree(include: ['*.jar'], dir: 'libs')
+    implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
+    implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
+    implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
+    implementation project(':capacitor-android')
+    testImplementation "junit:junit:$junitVersion"
+    androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
+    androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
+    implementation project(':capacitor-cordova-android-plugins')
+}
+
+apply from: 'capacitor.build.gradle'
+
+try {
+    def servicesJSON = file('google-services.json')
+    if (servicesJSON.text) {
+        apply plugin: 'com.google.gms.google-services'
+    }
+} catch(Exception e) {
+    logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
+}

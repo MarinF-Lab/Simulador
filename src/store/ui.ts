@@ -14,6 +14,9 @@ interface UIState {
   showDesc: boolean;
   /** Recuadro "¿Qué es?" abierto en Propiedades. */
   showInfo: boolean;
+  /** Imán al mover piezas: cuadrícula de 10 mm, agujeros y apoyo encima. Apagado, movimiento libre de 1 mm. */
+  magnet: boolean;
+  setMagnet: (v: boolean) => void;
   setShowDesc: (v: boolean) => void;
   setShowInfo: (v: boolean) => void;
   setTab: (t: Tab) => void;
@@ -39,6 +42,8 @@ export const useUI = create<UIState>((set) => ({
   collapsed: Object.fromEntries(CATEGORIES.map((c) => [c.id, false])) as Record<CategoryId, boolean>,
   showDesc: load("kinetic.showDesc", false),
   showInfo: load("kinetic.showInfo", true),
+  magnet: load("kinetic.magnet", false),
+  setMagnet: (magnet) => { save("kinetic.magnet", magnet); set({ magnet }); },
   setShowDesc: (showDesc) => { save("kinetic.showDesc", showDesc); set({ showDesc }); },
   setShowInfo: (showInfo) => { save("kinetic.showInfo", showInfo); set({ showInfo }); },
   setTab: (tab) => set({ tab }),

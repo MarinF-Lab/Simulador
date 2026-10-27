@@ -204,3 +204,53 @@ describe("piezas lisas y perforables", async () => {
     expect(hole.p.slice(0, 2)).toEqual([10, 0]);
   });
 });
+
+describe("colocación sin imán", async () => {
+  const { useUI } = await import("./ui");
+  const sq = (id: number, x: number, y: number, z = 0, h = 6) => ({ id, type: "custom", x, y, z, rot: [0, 0, 0] as [number, number, number], props: { shape: "-20,-20;20,-20;20,20;-20,20", h, holes: "Sin agujeros" } });
+
+  it("arrastrar no atraviesa: queda pegada a la otra pieza, y se mueve de a 1 mm", () => {
+    useUI.getState().setMagnet(false);
+    const st = useProject.getState();
+    st.load({ parts: [sq(1, 0, 0), sq(2, -100, 3)], cables: [], belts: [], joints: [], nextId: 3 });
+    st.beginDrag(2);
+    useProject.getState().moveLive(2, -73, 3);
+    expect(useProject.getState().project.parts[1]!.x).toBe(-73);
+    useProject.getState().moveLive(2, 30, 3);
+    const p = useProject.getState().project.parts[1]!;
+    expect(p.x).toBeGreaterThan(-40.5);
+    expect(p.x).toBeLessThanOrEqual(-39.8);
+    useProject.getState().endDrag(2, { x: -100, y: 3 });
+    expect(useProject.getState().structure.issues.some((i) => i.h === "Piezas superpuestas")).toBe(false);
+  });
+
+  it("una pieza pasa bajo otra elevada y al soltar sobre una pieza baja cae encima de ella", () => {
+    const st = useProject.getState();
+    st.load({ parts: [sq(1, 0, 0, 30), sq(2, -100, 0), sq(3, 100, 0, 0, 10)], cables: [], belts: [], joints: [], nextId: 4 });
+    st.beginDrag(2);
+    useProject.getState().moveLive(2, 0, 0);
+    useProject.getState().endDrag(2, { x: -100, y: 0 });
+    expect(useProject.getState().project.parts[1]).toMatchObject({ x: 0, y: 0, z: 0 });
+    // Subirla con ↑ la detiene bajo la pieza de arriba (30 mm − 6 de alto = 24).
+    for (let i = 0; i < 40; i++) useProject.getState().nudgeZ(2, 1);
+    expect(useProject.getState().project.parts[1]!.z).toBeCloseTo(24, 0);
+    // Una pieza en el aire, arrastrada sobre otra baja, se apoya encima al soltar.
+    const s2 = useProject.getState();
+    s2.load({ parts: [sq(2, -100, 0, 20), sq(3, 100, 0, 0, 10)], cables: [], belts: [], joints: [], nextId: 4 });
+    s2.beginDrag(2);
+    useProject.getState().moveLive(2, 100, 0);
+    useProject.getState().endDrag(2, { x: -100, y: 0 });
+    expect(useProject.getState().project.parts[0]).toMatchObject({ x: 100, z: 10 });
+  });
+
+  it("con imán vuelve la cuadrícula de 10 mm", () => {
+    useUI.getState().setMagnet(true);
+    const st = useProject.getState();
+    st.load({ parts: [sq(2, -100, 0)], cables: [], belts: [], joints: [], nextId: 3 });
+    st.beginDrag(2);
+    useProject.getState().moveLive(2, -73, 4);
+    expect(useProject.getState().project.parts[0]).toMatchObject({ x: -70, y: 0 });
+    useProject.getState().endDrag(2, { x: -100, y: 0 });
+    useUI.getState().setMagnet(false);
+  });
+});

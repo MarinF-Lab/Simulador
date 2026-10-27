@@ -33,14 +33,14 @@ function at(part: Part, rot: Vec3, c: V): Snap | null {
 
 const planar = (a: V, b: V) => Math.hypot(a[0] - b[0], a[1] - b[1]);
 
-export function snapRotor(project: Project, part: Part, x: number, y: number): Snap | null {
+export function snapRotor(project: Project, part: Part, x: number, y: number, tol = TOL): Snap | null {
   if (!isRotor(part.type)) return null;
   const me = ROTORS[part.type]!;
   // Largo real a lo largo del eje (un eje puede estar acortado).
   const meT = rotorAxis(part)?.t ?? me.t;
   const others = project.parts.filter((p) => p.id !== part.id);
   let best: { s: Snap; d: number } | null = null;
-  const offer = (s: Snap | null, d: number) => { if (s && d < TOL && (!best || d < best.d)) best = { s, d }; };
+  const offer = (s: Snap | null, d: number) => { if (s && d < tol && (!best || d < best.d)) best = { s, d }; };
 
   for (const o of others) {
     // 1. Eje de motor

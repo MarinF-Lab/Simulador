@@ -4,9 +4,12 @@ import { analyze, type Circuit } from "../core/electrical/analyze";
 import { clampZ, extent, findFree, newPart, placeOnTable, RESIZABLE, rotateLocal, unrotateLocal, type Axis, type Cable, type CableEnd, type Part, type Project, type PropValue, type Vec3 } from "../core/model/project";
 import { detachFrom, endPos, posKey, reattach, termWorld } from "../core/model/terminals";
 import { snapRotor } from "../core/mechanical/snap";
+import { blockers, restOn, slide, sweep } from "../core/model/footprint";
+import { useUI } from "./ui";
 import { isRotor } from "../core/mechanical/axes";
 import { solveTrain, type Train } from "../core/mechanical/train";
-import { alignedPairs, alignTo, holeAt, holesOf, nearestHole, restHeight, snapHoles, type HoleRef } from "../core/model/holes";
+import { alignedPairs, alignTo, holeAt, holesOf, nearestHole, snapHoles, type HoleRef } from "../core/model/holes";
+import { GRID_MM } from "../core/model/units";
 import { checkStructure, contactSpot, type StructureCheck } from "../core/model/structure";
 import { centered, customHoles, edgeDistance, inside, isSimple, parseDrill, parseShape, shapeText, type Pt } from "../core/model/polygon";
 import type { Joint } from "../core/model/project";
@@ -109,6 +112,8 @@ interface ProjectState {
   rotate: (id: number, axis?: Axis) => void;
   flip: (id: number) => void;
   setZ: (id: number, z: number) => void;
+  /** Sube (+1) o baja (−1) la pieza un paso, sin atravesar otras piezas. */
+  nudgeZ: (id: number, dir: 1 | -1) => void;
   setProp: (id: number, key: string, v: PropValue) => void;
   replace: (id: number) => void;
   /** Accionar: abre o cierra un interruptor, presiona o suelta un sensor de contacto. */
@@ -187,6 +192,17 @@ export const useProject = create<ProjectState>((set, get) => {
     set({ project, history });
   };
   const part = (id: number) => get().project.parts.find((p) => p.id === id);
+  const stepNow = () => (useUI.getState().magnet ? GRID_MM : 1);
+  /** Al soltar sin imán, la pieza cae hasta apoyarse en lo que tenga debajo (o la mesa). */
+  const drop = (id: number) => {
+    const s = get();
+    const p = part(id);
+    if (!p || useUI.getState().magnet || isRotor(p.type) || p.type === "text") return;
+    // Las piezas unidas con juntas o pegamento se quedan donde están (las sostiene la unión).
+    if ((s.project.joints ?? []).some((j) => j.a.part === id || j.b.part === id)) return;
+    const z = restOn(s.project, p, p.x, p.y, p.z);
+    if (z < p.z - 0.05) set({ project: { ...s.project, parts: s.project.parts.map((q) => (q.id === id ? { ...q, z } : q)) } });
+  };
   const cable = (id: number) => get().project.cables.find((c) => c.id === id);
   const setCables = (cables: Cable[]) => set({ project: { ...get().project, cables } });
   const initial = demoProject();
@@ -362,6 +378,7 @@ export const useProject = create<ProjectState>((set, get) => {
       return id;
     },
     commitTemp: (id) => {
+      if (part(id)) drop(id);
       const s = get();
       const p = part(id);
       if (p) {
@@ -388,35 +405,59 @@ export const useProject = create<ProjectState>((set, get) => {
       const s = get();
       const p = part(id);
       if (!p) return;
-      // Engranajes y poleas: imán al eje de un motor, a otro eje o a la distancia de engrane.
+      const magnet = useUI.getState().magnet;
       const o = s.dragFrom ?? p;
-      let next: Pick<Part, "x" | "y" | "z" | "rot">;
+      const base = { ...p, rot: o.rot };
+      // Lo que ya atravesaba al empezar no la frena (así puede salir de ahí).
+      let now: Set<number> | null = null;
+      const free = (n: { x: number; y: number; z: number }) => {
+        now ??= new Set(blockers(s.project, base, p));
+        const start = now;
+        return blockers(s.project, base, n).every((b) => start.has(b));
+      };
+      let next: { x: number; y: number; z: number } | null = null;
       if (isRotor(p.type)) {
-        const snapped = snapRotor(s.project, { ...p, rot: o.rot, z: o.z }, x, y);
-        next = snapped ?? { ...placeOnTable({ ...p, rot: o.rot }, x, y), z: o.z, rot: o.rot };
-      } else {
-        // Imán de agujeros primero; si no, la pieza se apoya sobre lo que tenga debajo (o la mesa).
-        const base = { ...p, rot: o.rot };
+        // Engranajes y poleas: imán al eje de un motor, a otro eje o a la distancia de engrane.
+        const snapped = snapRotor(s.project, base, x, y, magnet ? 16 : 4);
+        if (snapped) {
+          if (snapped.x !== p.x || snapped.y !== p.y || snapped.z !== p.z || snapped.rot.join() !== p.rot.join()) {
+            set({ project: { ...s.project, parts: s.project.parts.map((q) => (q.id === id ? { ...q, ...snapped } : q)) } });
+          }
+          return;
+        }
+      } else if (magnet) {
+        // Con imán: agujeros primero; si no, la pieza se apoya sobre lo que tenga debajo.
         const h = snapHoles(s.project, base, x, y);
-        if (h) next = { ...h, rot: o.rot };
+        if (h && free(h)) next = h;
         else {
-          const at = placeOnTable(base, x, y);
-          next = { ...at, z: restHeight(s.project, base, at.x, at.y), rot: o.rot };
+          const at = placeOnTable(base, x, y, GRID_MM);
+          const on = { ...at, z: restOn(s.project, base, at.x, at.y) };
+          if (free(on)) next = on;
         }
       }
-      if (next.x === p.x && next.y === p.y && next.z === p.z && next.rot.join() === p.rot.join()) return;
-      set({ project: { ...s.project, parts: s.project.parts.map((q) => (q.id === id ? { ...q, ...next } : q)) } });
+      if (!next) {
+        // Sin imán (o si el imán choca): se mueve a su altura y se detiene al tocar otra pieza.
+        const at = placeOnTable(base, x, y, magnet ? GRID_MM : 1);
+        next = slide(s.project, base, p, { ...at, z: p.z });
+        if (magnet && !isRotor(p.type)) next = { ...next, z: restOn(s.project, base, next.x, next.y, next.z) };
+      }
+      if (next.x === p.x && next.y === p.y && next.z === p.z && o.rot.join() === p.rot.join()) return;
+      const n = next;
+      set({ project: { ...s.project, parts: s.project.parts.map((q) => (q.id === id ? { ...q, ...n, rot: o.rot } : q)) } });
     },
     beginDrag: (id) => {
       const p = part(id);
       set({ dragging: id, selected: id, pending: null, dragFrom: p ? { x: p.x, y: p.y, z: p.z, rot: p.rot } : null });
     },
     endDrag: (id, fromXY) => {
-      const s = get();
-      const p = part(id);
+      let s = get();
+      let p = part(id);
       const from = s.dragFrom ?? { ...fromXY, z: p?.z ?? 0, rot: p?.rot ?? [0, 0, 0] };
       set({ dragging: null, dragFrom: null });
+      if (p) drop(id);
+      p = part(id);
       if (!p || (p.x === from.x && p.y === from.y && p.z === from.z && p.rot.join() === from.rot.join())) return;
+      s = get();
       // Las puntas sueltas que quedaron sobre un borne se pegan a él.
       const cables = reattach(s.project);
       const move: Command = { kind: "update", id, before: { x: from.x, y: from.y, z: from.z, rot: from.rot }, after: { x: p.x, y: p.y, z: p.z, rot: p.rot } };
@@ -431,7 +472,7 @@ export const useProject = create<ProjectState>((set, get) => {
       const k = a === "x" ? 0 : a === "y" ? 1 : 2;
       const rot = [...p.rot] as Part["rot"];
       rot[k] = (rot[k] + 1) % 4;
-      const at = placeOnTable({ ...p, rot }, p.x, p.y);
+      const at = placeOnTable({ ...p, rot }, p.x, p.y, stepNow());
       commit(updateCmd(get().project, id, { rot, ...at }));
     },
     flip: (id) => {
@@ -448,6 +489,13 @@ export const useProject = create<ProjectState>((set, get) => {
       if (upd) commit({ kind: "batch", cmds: [upd, ...cableDiff(s.project.cables, cables)] });
     },
     setZ: (id, z) => commit(updateCmd(get().project, id, { z: clampZ(z) }, `${id}:z`)),
+    nudgeZ: (id, dir) => {
+      const p = part(id);
+      if (!p) return;
+      const step = useUI.getState().magnet ? GRID_MM : 1;
+      const to = sweep(get().project, p, p, { x: p.x, y: p.y, z: clampZ(p.z + dir * step) });
+      if (to.z !== p.z) commit(updateCmd(get().project, id, { z: clampZ(to.z) }, `${id}:z`));
+    },
     setProp: (id, key, v) => commit(updateCmd(get().project, id, { props: { [key]: v } } as Patch, `${id}:${key}`)),
     replace: (id) => commit(updateCmd(get().project, id, { props: { burned: undefined, burnV: undefined } })),
     pressed: {},
@@ -466,7 +514,7 @@ export const useProject = create<ProjectState>((set, get) => {
       if (!p || !range) return;
       const v = Math.min(range[1], Math.max(range[0], Math.round(mm / 10) * 10));
       const next = { ...p, props: { ...p.props, [key]: v } };
-      const at = placeOnTable(next, p.x, p.y);
+      const at = placeOnTable(next, p.x, p.y, stepNow());
       commit(updateCmd(get().project, id, { props: { [key]: v }, ...at }, `${id}:${key}`));
     },
     actuate: (id) => {

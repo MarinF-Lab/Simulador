@@ -145,21 +145,22 @@ export function extent(part: Pick<Part, "type" | "rot"> & { props?: Part["props"
 }
 
 /** Ajusta a la cuadrícula sin salir de [-h, h]. */
-function fit(v: number, h: number): number {
+function fit(v: number, h: number, step: number): number {
   if (h <= 0) return 0;
-  let s = snap(Math.min(h, Math.max(-h, v)));
-  if (s > h) s -= GRID_MM;
-  if (s < -h) s += GRID_MM;
-  return s;
+  let s = snap(Math.min(h, Math.max(-h, v)), step);
+  if (s > h) s -= step;
+  if (s < -h) s += step;
+  return Math.round(s * 10) / 10;
 }
 
-/** Ajusta el centro a la cuadrícula y lo mantiene dentro de la mesa. */
-export function placeOnTable(part: Pick<Part, "type" | "rot">, x: number, y: number): { x: number; y: number } {
+/** Ajusta el centro a la cuadrícula (o al paso pedido) y lo mantiene dentro de la mesa. */
+export function placeOnTable(part: Pick<Part, "type" | "rot"> & { props?: Part["props"] }, x: number, y: number, step: number = GRID_MM): { x: number; y: number } {
   const [ex, ey] = extent(part);
-  return { x: fit(x, TABLE.w / 2 - ex / 2), y: fit(y, TABLE.d / 2 - ey / 2) };
+  return { x: fit(x, TABLE.w / 2 - ex / 2, step), y: fit(y, TABLE.d / 2 - ey / 2, step) };
 }
 
-export const clampZ = (z: number): number => Math.min(TABLE.maxZ, Math.max(0, snap(z)));
+/** Altura dentro de la mesa, redondeada a 0,1 mm (así una pieza puede quedar apoyada sobre otra de 6 mm). */
+export const clampZ = (z: number): number => Math.min(TABLE.maxZ, Math.max(0, Math.round(z * 10) / 10));
 
 interface Box { x0: number; x1: number; y0: number; y1: number }
 function boxOf(part: Part, x = part.x, y = part.y): Box {

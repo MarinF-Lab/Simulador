@@ -165,3 +165,121 @@ describe("brazo de servos del ejemplo", () => {
     }
   });
 });
+
+describe("auto del ejemplo", () => {
+  it("avanza por la mesa con sus 4 ruedas", async () => {
+    const { EXAMPLES } = await import("../core/persistence/examples");
+    const { analyze } = await import("../core/electrical/analyze");
+    const project = EXAMPLES.find((e) => e.id === "car")!.build();
+    const c = analyze(project);
+    const sim = new Sim(project);
+    const props = (id: number) => project.parts.find((p) => p.id === id)?.props ?? {};
+    const volt = (id: number) => c.readings[id]?.v ?? 0;
+    for (const m of project.parts.filter((p) => p.type === "dcmotor")) expect(Math.abs(volt(m.id))).toBeGreaterThan(5);
+    run(sim, 2, volt, props);
+    const chassis = sim.poses().get(1)!.p;
+    expect(chassis[0] - -300).toBeGreaterThan(50);
+    expect(Math.abs(chassis[1])).toBeLessThan(30);
+    expect(chassis[2]).toBeGreaterThan(5);
+    sim.free();
+  });
+});
+
+describe("biela y pistón del ejemplo", () => {
+  it("el émbolo va y viene unas 2 veces el radio de la manivela", async () => {
+    const { EXAMPLES } = await import("../core/persistence/examples");
+    const { analyze } = await import("../core/electrical/analyze");
+    const project = EXAMPLES.find((e) => e.id === "crank")!.build();
+    const c = analyze(project);
+    const sim = new Sim(project);
+    const props = (id: number) => project.parts.find((p) => p.id === id)?.props ?? {};
+    const volt = (id: number) => c.readings[id]?.v ?? 0;
+    let lo = Infinity, hi = -Infinity;
+    for (let i = 0; i < 300; i++) {
+      sim.step(1 / 60, { voltage: volt, props });
+      const e = sim.extensions().get(5)!;
+      lo = Math.min(lo, e); hi = Math.max(hi, e);
+    }
+    // Manivela de 26 mm: el émbolo recorre 52 mm, desde el punto muerto de diseño hacia atrás.
+    expect(hi - lo).toBeGreaterThan(45);
+    expect(hi - lo).toBeLessThan(58);
+    expect(hi).toBeLessThan(3);
+    sim.free();
+  });
+});
+
+describe("grúa del ejemplo", () => {
+  it("la polea enrolla la cuerda y levanta la pesa", async () => {
+    const { EXAMPLES } = await import("../core/persistence/examples");
+    const { analyze } = await import("../core/electrical/analyze");
+    const { solveTrain } = await import("../core/mechanical/train");
+    const { motorSpeeds } = await import("../store/project");
+    const project = EXAMPLES.find((e) => e.id === "crane")!.build();
+    const c = analyze(project);
+    const rpm = solveTrain(project, motorSpeeds(project, c)).rpm;
+    expect(Math.abs(rpm[6] ?? 0)).toBeGreaterThan(15);
+    const sim = new Sim(project);
+    const props = (id: number) => project.parts.find((p) => p.id === id)?.props ?? {};
+    const env = { voltage: (id: number) => c.readings[id]?.v ?? 0, props, rpm: (id: number) => rpm[id] ?? 0 };
+    for (let i = 0; i < 120; i++) sim.step(1 / 60, env);
+    const z = sim.poses().get(7)!.p[2];
+    expect(z).toBeGreaterThan(15 + 40);
+    sim.free();
+  });
+});
+
+describe("placa de control del ejemplo", () => {
+  it("el actuador avanza hasta tocar el sensor y la placa lo detiene", async () => {
+    const { EXAMPLES } = await import("../core/persistence/examples");
+    const { analyze } = await import("../core/electrical/analyze");
+    const project = EXAMPLES.find((e) => e.id === "controller")!.build();
+    const warn = analyze(project).issues.filter((i) => i.s === "warn" || i.s === "err");
+    expect(warn).toEqual([]);
+    const sim = new Sim(project);
+    const props = (id: number) => project.parts.find((p) => p.id === id)?.props ?? {};
+    let c = analyze(project);
+    const env = { voltage: (id: number) => c.readings[id]?.v ?? 0, props };
+    expect(env.voltage(14)).toBeGreaterThan(5);
+    let touched = -1;
+    for (let i = 0; i < 360; i++) {
+      sim.step(1 / 60, env);
+      if (i % 6 === 0) {
+        // Como en la app: los sensores presionados cambian el circuito.
+        const pressed = sim.status(env, 0.1).pressed;
+        c = analyze({ ...project, parts: project.parts.map((p) => (pressed[p.id] ? { ...p, props: { ...p.props, pressed: true } } : p)) });
+        if (pressed[19] && touched < 0) touched = i;
+      }
+    }
+    expect(touched).toBeGreaterThan(0);
+    expect(Math.abs(env.voltage(14))).toBeLessThan(0.05);
+    const ext = sim.extensions().get(14)!;
+    // La paleta estaba a 40 mm del sensor: se detuvo cerca de ahí, lejos del final de la carrera.
+    expect(ext).toBeGreaterThan(30);
+    expect(ext).toBeLessThan(60);
+    sim.free();
+  });
+});
+
+describe("molino del ejemplo", () => {
+  it("las aspas pegadas giran con el disco", async () => {
+    const { EXAMPLES } = await import("../core/persistence/examples");
+    const { analyze } = await import("../core/electrical/analyze");
+    const { checkStructure } = await import("../core/model/structure");
+    const project = EXAMPLES.find((e) => e.id === "windmill")!.build();
+    expect(checkStructure(project).issues).toEqual([]);
+    const c = analyze(project);
+    const sim = new Sim(project);
+    const props = (id: number) => project.parts.find((p) => p.id === id)?.props ?? {};
+    const angle = () => { const p = sim.poses().get(4)!.p; return Math.atan2(p[1], p[0]); };
+    const a0 = angle(), d0 = Math.hypot(...(sim.poses().get(4)!.p.slice(0, 2) as [number, number]));
+    run(sim, 0.5, (id) => c.readings[id]?.v ?? 0, props);
+    let da = angle() - a0;
+    while (da < -Math.PI) da += 2 * Math.PI;
+    while (da > Math.PI) da -= 2 * Math.PI;
+    // 30 RPM: media vuelta por segundo, unos 90° en 0,5 s. El aspa sigue a la misma distancia del eje.
+    expect(Math.abs(da)).toBeGreaterThan((60 * Math.PI) / 180);
+    expect(Math.hypot(...(sim.poses().get(4)!.p.slice(0, 2) as [number, number]))).toBeCloseTo(d0, 0);
+    expect(sim.poses().get(4)!.p[2]).toBeGreaterThan(60);
+    sim.free();
+  });
+});

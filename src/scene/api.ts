@@ -14,6 +14,8 @@ export interface SceneApi {
   externalDrag: (id: number | null, clientX?: number, clientY?: number) => void;
   /** Punto de la pantalla donde se ve un punto de la mesa (para pruebas automáticas). */
   toScreen: (p: [number, number, number]) => { x: number; y: number };
+  /** Llamadas de dibujo y triángulos del último cuadro (para medir el rendimiento). */
+  renderInfo: () => { calls: number; triangles: number; geometries: number; textures: number };
 }
 
 const noop = () => {};
@@ -26,6 +28,7 @@ export const sceneApi: SceneApi = {
   isoView: noop,
   externalDrag: noop,
   toScreen: () => ({ x: 0, y: 0 }),
+  renderInfo: () => ({ calls: 0, triangles: 0, geometries: 0, textures: 0 }),
 };
 
 /** Elementos HTML que la escena mueve en cada cuadro: botones flotantes y ejes. */

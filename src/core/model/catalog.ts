@@ -4,10 +4,10 @@ export type CategoryId = "electrical" | "motors" | "mechanical" | "structures" |
 
 /** Familia de la pieza: decide qué secciones de Propiedades se muestran. */
 export type PartKind =
-  | "source" | "resistor" | "lamp" | "led" | "switch" | "wire" | "hbridge"
+  | "source" | "resistor" | "lamp" | "led" | "switch" | "wire" | "hbridge" | "controller" | "splitter"
   | "dcmotor" | "stepper" | "servo" | "linear"
-  | "shaft" | "gear" | "pulley" | "belt" | "bearing" | "support" | "link" | "joint"
-  | "profile" | "plate" | "bolt" | "bracket"
+  | "shaft" | "gear" | "pulley" | "belt" | "bearing" | "wheel" | "piston" | "rope" | "weight" | "support" | "link" | "joint"
+  | "profile" | "plate" | "bolt" | "bracket" | "custom" | "draw" | "glue"
   | "sensor" | "meter" | "text";
 
 export interface CatalogItem {
@@ -39,6 +39,8 @@ export const CATALOG: CatalogItem[] = [
   { id: "switch", name: "Interruptor", kind: "switch", category: "electrical", desc: "Abre o cierra el paso de la corriente. Con el botón Abrir o Cerrar, sobre la pieza, apagas o enciendes lo que alimenta." },
   { id: "wire", name: "Cable", kind: "wire", category: "electrical", desc: "Une dos bornes. También puedes crear cables tocando un borne y luego otro. Rojo es el lado +, azul el lado −." },
   { id: "hbridge", name: "Puente H", kind: "hbridge", category: "electrical", tags: ["controlador", "driver"], desc: "Controla el sentido de un motor sin cambiar los cables. Entrada: la pila. Salida: el motor. Con su botón eliges Adelante, Atrás o Freno." },
+  { id: "controller", name: "Placa de control", kind: "controller", category: "electrical", tags: ["receptor", "control remoto", "driver", "canales", "inversor"], desc: "Placa con 4 canales, como la de un auto a control remoto. Conecta la pila a su entrada y un motor o una luz a cada canal. Cada canal elige su sentido (Adelante, Atrás, Freno o Apagado) y su potencia, y puede detenerse o invertirse cuando un sensor de contacto se presiona." },
+  { id: "splitter", name: "Repartidor", kind: "splitter", category: "electrical", tags: ["regleta", "bornera", "distribuidor", "repartición"], desc: "Regleta que reparte la pila a 4 salidas. Cada salida tiene su − y su +, unidos a la entrada: así alimentas varias piezas desde una sola pila." },
 
   { id: "dcmotor", name: "Motor DC", kind: "dcmotor", category: "motors", desc: "Gira cuando recibe voltaje: más voltaje, más rápido. Monta un engranaje, una polea o un eslabón en la punta de su eje para que lo mueva." },
   { id: "stepper", name: "Motor paso a paso", kind: "stepper", category: "motors", tags: ["stepper"], desc: "Motor que avanza en pasos fijos, por ejemplo 200 por vuelta. Sirve para girar a un ángulo exacto o a una velocidad constante." },
@@ -54,7 +56,10 @@ export const CATALOG: CatalogItem[] = [
   { id: "pulleyL", name: "Polea", kind: "pulley", category: "mechanical", variant: "L", desc: "Polea grande. Movida por una chica con una correa, gira más lento." },
   { id: "belt", name: "Correa", kind: "belt", category: "mechanical", tags: ["liga", "banda"], desc: "Une dos poleas para que giren juntas. Elige Correa y toca dos poleas. La normal mantiene el sentido de giro; la cruzada lo invierte." },
   { id: "bearing", name: "Rodamiento", kind: "bearing", category: "mechanical", desc: "Sostiene un eje para que gire suave. Se apoya en una placa o un soporte, y el eje pasa por su centro." },
+  { id: "wheel", name: "Rueda", kind: "wheel", category: "mechanical", tags: ["llanta", "neumático", "neumatico", "auto"], desc: "Rueda de goma de 60 mm. Móntala en la punta del eje de un motor y gira con él; si toca el suelo, empuja lo que la lleva, como un auto." },
+  { id: "piston", name: "Pistón", kind: "piston", category: "mechanical", tags: ["cilindro", "émbolo", "embolo", "biela"], desc: "Cilindro con un émbolo que se desliza libre de punta a punta. Une el perno del émbolo a una biela: al girar la manivela, el émbolo va y viene." },
   { id: "support", name: "Soporte", kind: "support", category: "mechanical", desc: "Base con un agujero arriba para sostener un eje o una junta a cierta altura." },
+  { id: "rope", name: "Cuerda", kind: "rope", category: "mechanical", tags: ["hilo", "grúa", "grua", "cable de acero"], desc: "Cuelga una pieza de una polea tambor: elige Cuerda, toca la polea y luego la pieza. Al girar la polea la cuerda se enrolla y sube la carga; al revés, la baja." },
   { id: "link", name: "Eslabón", kind: "link", category: "mechanical", tags: ["biela", "brazo"], desc: "Barra con un agujero en cada extremo. Sirve para armar brazos y bielas: une sus agujeros con juntas rotacionales." },
   { id: "joint", name: "Junta rotacional", kind: "joint", category: "mechanical", tags: ["articulación", "bisagra"], desc: "Herramienta: une dos piezas por agujeros alineados para que puedan girar. Elige Junta rotacional y toca una de las piezas." },
 
@@ -63,10 +68,14 @@ export const CATALOG: CatalogItem[] = [
   { id: "profile240", name: "Perfil metálico", kind: "profile", category: "structures", variant: "240 mm", desc: "Barra metálica con agujeros cada 10 mm, para armar estructuras. Su largo se cambia en Propiedades." },
   { id: "plate", name: "Placa base", kind: "plate", category: "structures", desc: "Base fija a la mesa, con agujeros cada 20 mm. Lo que se apoya encima queda unido a ella al simular. Su largo y ancho se cambian." },
   { id: "bracket", name: "Escuadra", kind: "bracket", category: "structures", variant: "en L", tags: ["ángulo", "angulo", "soporte de servo"], desc: "Pieza en forma de L: agujeros en la base y en el ala vertical. Sirve para montar un servo de lado, por ejemplo sobre otro servo, y así armar brazos que suben y bajan." },
+  { id: "custom", name: "Pieza libre", kind: "custom", category: "structures", tags: ["madera", "forma", "recorte", "diseño libre"], desc: "Placa con la forma que quieras. Selecciónala y elige Editar forma para arrastrar sus vértices y lados; en Propiedades cambias su grosor, material y agujeros." },
+  { id: "draw", name: "Dibujar pieza", kind: "draw", category: "structures", tags: ["forma", "polígono", "poligono", "diseño libre"], desc: "Herramienta: toca la mesa para poner los vértices de una pieza nueva y luego Listo. Tocar el primer punto también cierra la forma." },
+  { id: "glue", name: "Pegamento", kind: "glue", category: "structures", tags: ["pegar", "silicona", "adhesivo", "unir"], desc: "Herramienta: une dos piezas que se tocan, aunque no tengan agujeros. Elige Pegamento y toca las dos piezas." },
   { id: "bolt", name: "Unión", kind: "bolt", category: "structures", variant: "perno fijo", tags: ["perno", "tornillo"], desc: "Herramienta: une dos piezas por agujeros alineados para que no se muevan entre sí, como un perno. Elige Unión y toca una de las piezas." },
 
   { id: "sensorAngle", name: "Sensor", kind: "sensor", category: "other", variant: "de ángulo", tags: ["encoder"], desc: "Mide el ángulo de una junta o un eje. Móntalo en la junta y verás su ángulo en vivo al simular." },
   { id: "sensorContact", name: "Sensor", kind: "sensor", category: "other", variant: "de contacto", tags: ["final de carrera"], desc: "Pulsador: cierra el circuito mientras está presionado. Lo presionas con su botón o, al simular, cuando una pieza lo toca." },
+  { id: "weight", name: "Pesa", kind: "weight", category: "other", tags: ["carga", "peso"], desc: "Bloque de acero de 30 mm (unos 200 g) con un gancho arriba. Sirve como carga para una grúa o para probar la fuerza de un mecanismo." },
   { id: "meter", name: "Voltímetro", kind: "meter", category: "other", tags: ["medidor"], desc: "Voltímetro: mide el voltaje entre sus dos bornes sin afectar el circuito. Conéctalo a los extremos de lo que quieras medir." },
   { id: "text", name: "Texto", kind: "text", category: "other", tags: ["nota", "etiqueta"], desc: "Cartel para anotar algo en la mesa. Escribe el texto en Propiedades." },
 ];

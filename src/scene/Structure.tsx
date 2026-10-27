@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { holeAt } from "../core/model/holes";
+import { jointPoint } from "../core/model/structure";
 import { useProject } from "../store/project";
 
 // Juntas en 3D: la rotacional es un pasador con anillo índigo; la fija, la cabeza de un perno.
@@ -8,6 +9,8 @@ const pin = new THREE.CylinderGeometry(2.6, 2.6, 1, 16);
 const head = new THREE.CylinderGeometry(4.5, 4.5, 3, 6);
 const ring = new THREE.TorusGeometry(5.5, 1.1, 8, 24);
 const hit = new THREE.SphereGeometry(9, 10, 8);
+const drop = new THREE.SphereGeometry(5, 16, 12);
+const glueMat = new THREE.MeshStandardMaterial({ color: "#f4ecd2", roughness: 0.2, transparent: true, opacity: 0.85 });
 const hitMat = new THREE.MeshBasicMaterial({ visible: false });
 const steel = new THREE.MeshStandardMaterial({ color: "#c7cedc", metalness: 0.8, roughness: 0.3 });
 const accent = new THREE.MeshStandardMaterial({ color: "#7c7cf0", emissive: "#5b5bd6", emissiveIntensity: 0.4 });
@@ -26,10 +29,22 @@ export function Joints() {
   return (
     <group name="joints">
       {(project.joints ?? []).map((j) => {
+        const sel = selected === j.id, bad = broken.has(j.id);
+        // Pegamento: una gota en el centro del contacto.
+        if (j.kind === "glue") {
+          const p = jointPoint(project, j) ?? project.parts.find((x) => x.id === j.a.part) ?? null;
+          if (!p) return null;
+          const at: [number, number, number] = Array.isArray(p) ? p : [p.x, p.y, p.z];
+          return (
+            <group key={j.id} position={at}>
+              <mesh geometry={drop} scale={[1.6, 1.0, 1.0]} material={sel ? selMat : bad ? warnMat : glueMat} />
+              <mesh geometry={hit} material={hitMat} userData={{ joint: j.id }} />
+            </group>
+          );
+        }
         const h = holeAt(project, j.a);
         if (!h) return null;
         const q = quatFor(h.n);
-        const sel = selected === j.id, bad = broken.has(j.id);
         const ringQ = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), new THREE.Vector3(...h.n));
         return (
           <group key={j.id} position={h.p}>

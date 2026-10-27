@@ -9,7 +9,8 @@ import { BendHandle, CableEnds, Cables, FlowTicker, Terminals } from "./Electric
 import { brightness } from "../core/electrical/analyze";
 import { ROTORS } from "../core/mechanical/axes";
 import { useUI } from "../store/ui";
-import { Belts } from "./Mechanical";
+import { Belts, Ropes } from "./Mechanical";
+import { DrawPreview, ShapeHandles } from "./Shapes";
 import { Joints } from "./Structure";
 import { PhysicsRunner } from "./Physics";
 import { simPoses, useSim } from "../store/sim";
@@ -69,6 +70,11 @@ function OutlineBox({ part, kind, pad = 6 }: { part: Part; kind: keyof typeof BO
   );
 }
 
+/** Pantallas táctiles (celulares y tabletas): menos píxeles y sombras más livianas para ir fluido. */
+const touch = (() => {
+  try { return matchMedia("(pointer: coarse)").matches; } catch { return false; }
+})();
+
 const reducedMotion = (() => {
   try { return matchMedia("(prefers-reduced-motion: reduce)").matches; } catch { return false; }
 })();
@@ -125,7 +131,7 @@ function useSimPose(ref: RefObject<THREE.Group | null>, part: Part, center: [num
 function useRod(ref: RefObject<THREE.Group | null>, part: Part) {
   const rod = useRef<THREE.Object3D | null>(null);
   useFrame(() => {
-    if (part.type !== "linear" || !ref.current) return;
+    if ((part.type !== "linear" && part.type !== "piston") || !ref.current) return;
     rod.current ??= ref.current.getObjectByName("rod") ?? null;
     if (rod.current) rod.current.position.x = simPoses.ext.get(part.id) ?? 0;
   });
@@ -158,7 +164,7 @@ function SunLight() {
     // La esquina más lejana de la mesa queda a unos 970 mm del eje de la luz: el área cubre 1100.
     c.left = -1100; c.right = 1100; c.top = 1100; c.bottom = -1100; c.near = 100; c.far = 2600;
     c.updateProjectionMatrix();
-    l.shadow.mapSize.set(2048, 2048);
+    l.shadow.mapSize.set(touch ? 1024 : 2048, touch ? 1024 : 2048);
     l.shadow.bias = -0.0005;
     l.shadow.normalBias = 0.6;
     l.shadow.needsUpdate = true;
@@ -181,7 +187,7 @@ export function Scene() {
       shadows
       orthographic
       frameloop="demand"
-      dpr={[1, 2]}
+      dpr={[1, touch ? 1.5 : 2]}
       camera={{ position: [600, -600, 600], zoom: 1, near: 1, far: 20000, up: [0, 0, 1] }}
       style={{ touchAction: "none", position: "absolute", inset: 0 }}
       aria-label="Mesa de trabajo 3D"
@@ -201,7 +207,10 @@ export function Scene() {
       <CableEnds />
       <BendHandle />
       <Belts />
+      <Ropes />
       {!running && <Joints />}
+      <DrawPreview />
+      <ShapeHandles />
       {running && <PhysicsRunner />}
       <FlowTicker />
       <Controller />

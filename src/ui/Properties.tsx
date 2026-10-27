@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { ChannelsPanel } from "./Channels";
 import { ChevronDown, ChevronUp, RotateCw, Trash2 } from "lucide-react";
 import { brightness, ELEC_DEFAULTS } from "../core/electrical/analyze";
 import type { Issue } from "../core/electrical/circuit";
@@ -454,6 +455,32 @@ function BeltPanel({ id }: { id: number }) {
   if (!belt) return null;
   const A = mech.axisOf[belt.a], B = mech.axisOf[belt.b];
   const ratio = A && B ? A.r / B.r : 0;
+  if (belt.rope) {
+    const w = mech.rpm[belt.a] ?? 0;
+    const speed = A ? (w / 60) * 2 * Math.PI * A.r : 0;
+    return (
+      <>
+        <div className="flex items-center gap-3 rounded-xl border border-line bg-panel-2/60 p-3">
+          <PartIcon kind="rope" className="size-10 text-ink/85" />
+          <div className="min-w-0 flex-1">
+            <p className="font-semibold">Cuerda</p>
+            <p className="text-xs text-muted">De la polea n.º {belt.a} a la pieza n.º {belt.b}</p>
+          </div>
+          <button onClick={() => remove(id)} aria-label="Eliminar cuerda" className="grid size-11 place-items-center rounded-lg text-muted hover:bg-panel hover:text-err">
+            <Trash2 className="size-5" />
+          </button>
+        </div>
+        <WhatIsIt desc={findItem("rope")!.desc} />
+        <section className="rounded-xl border border-line px-3 py-2">
+          <h3 className="pb-2 text-xs font-semibold tracking-widest text-muted uppercase">Lecturas</h3>
+          <div className="grid grid-cols-2 gap-2 pb-1">
+            <Cell k="Tambor" v={fmtRpm(w)} />
+            <Cell k="Carga" v={speed > 0.5 ? `sube ${fmt(speed)} mm/s` : speed < -0.5 ? `baja ${fmt(-speed)} mm/s` : "quieta"} />
+          </div>
+        </section>
+      </>
+    );
+  }
   return (
     <>
       <div className="flex items-center gap-3 rounded-xl border border-line bg-panel-2/60 p-3">
@@ -492,23 +519,23 @@ function JointPanel({ id }: { id: number }) {
   return (
     <>
       <div className="flex items-center gap-3 rounded-xl border border-line bg-panel-2/60 p-3">
-        <PartIcon kind={joint.kind === "revolute" ? "joint" : "bolt"} className="size-10 text-ink/85" />
+        <PartIcon kind={joint.kind === "revolute" ? "joint" : joint.kind === "glue" ? "glue" : "bolt"} className="size-10 text-ink/85" />
         <div className="min-w-0 flex-1">
-          <p className="font-semibold">{joint.kind === "revolute" ? "Junta rotacional" : "Unión fija"}</p>
+          <p className="font-semibold">{joint.kind === "revolute" ? "Junta rotacional" : joint.kind === "glue" ? "Pegamento" : "Unión fija"}</p>
           <p className="text-xs text-muted">Une {nm(joint.a.part).toLowerCase()} con {nm(joint.b.part).toLowerCase()}</p>
         </div>
         <button onClick={() => remove(id)} aria-label="Eliminar junta" className="grid size-11 place-items-center rounded-lg text-muted hover:bg-panel hover:text-err">
           <Trash2 className="size-5" />
         </button>
       </div>
-      <WhatIsIt desc={findItem(joint.kind === "revolute" ? "joint" : "bolt")!.desc.replace(/^Herramienta: /, "")} />
-      <div className="flex gap-2">
+      <WhatIsIt desc={findItem(joint.kind === "revolute" ? "joint" : joint.kind === "glue" ? "glue" : "bolt")!.desc.replace(/^Herramienta: /, "")} />
+      {joint.kind !== "glue" && <div className="flex gap-2">
         {(["revolute", "fixed"] as const).map((k) => (
           <button key={k} onClick={() => setJointKind(id, k)} aria-pressed={joint.kind === k} className={"min-h-11 flex-1 rounded-lg border px-3 text-sm font-medium " + (joint.kind === k ? "border-accent bg-accent text-accent-ink" : "border-line")}>
             {k === "revolute" ? "Rotacional (gira)" : "Fija (perno)"}
           </button>
         ))}
-      </div>
+      </div>}
       <ComponentStatus id={id} />
     </>
   );
@@ -595,6 +622,7 @@ export function Properties() {
         {part.type === "dcmotor" && <MotorSpeed id={part.id} />}
         {(part.type === "servo" || part.type === "stepper" || part.type === "linear" || part.type === "sensorAngle") && <ActuatorReadings id={part.id} type={part.type} />}
         {part.type === "servo" && <ServoSliders />}
+        {part.type === "controller" && <ChannelsPanel part={part} />}
         {isRotor(part.type) && <Motion id={part.id} />}
 
         {(part.type === "switch" || part.type === "sensorContact") && (

@@ -1,7 +1,9 @@
+import { useState } from "react";
 import { ChartLine, Activity, PencilRuler, Play, Redo2, Save, Square, Undo2 } from "lucide-react";
 import { useUI, type Tab } from "../store/ui";
 import { useProject } from "../store/project";
 import { Logo } from "./Logo";
+import { ProjectMenu } from "./ProjectMenu";
 
 const TABS: { id: Tab; name: string; Icon: typeof Play }[] = [
   { id: "design", name: "Diseño", Icon: PencilRuler },
@@ -17,6 +19,7 @@ export function TopBar() {
   const canUndo = useProject((s) => s.history.past.length > 0);
   const canRedo = useProject((s) => s.history.future.length > 0);
   const { undo, redo } = useProject();
+  const [menu, setMenu] = useState(false);
   return (
     <header className="z-20 border-b border-line bg-panel pl-[max(12px,env(safe-area-inset-left,0px))] pr-[max(12px,env(safe-area-inset-right,0px))]">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 py-1.5 lg:flex-nowrap lg:gap-4">
@@ -51,7 +54,7 @@ export function TopBar() {
         </nav>
 
         <div className="ml-auto flex items-center gap-1 lg:ml-0">
-          <button className={iconBtn} aria-label="Guardar" title="Guardar (llega en la etapa 8)" disabled>
+          <button className={iconBtn} aria-label="Proyecto: guardar, abrir y ejemplos" title="Proyecto: guardar, abrir y ejemplos" aria-haspopup="dialog" onClick={() => setMenu(true)}>
             <Save className="size-5" />
           </button>
           <button className={iconBtn} aria-label="Deshacer" title="Deshacer (Ctrl+Z)" onClick={undo} disabled={!canUndo}>
@@ -74,6 +77,7 @@ export function TopBar() {
           </button>
         </div>
       </div>
+      {menu && <ProjectMenu onClose={() => setMenu(false)} />}
     </header>
   );
 }

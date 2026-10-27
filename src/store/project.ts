@@ -1,14 +1,16 @@
 import { create } from "zustand";
-import { cableDiff, emptyHistory, exec, record, redo, removeCableCmd, removeCmd, shapeOf, undo, updateCmd, type CableShape, type Command, type History, type Patch } from "../core/history/commands";
+import { apply, cableDiff, emptyHistory, exec, record, redo, removeCableCmd, removeCmd, shapeOf, undo, updateCmd, type CableShape, type Command, type History, type Patch } from "../core/history/commands";
 import { analyze, type Circuit } from "../core/electrical/analyze";
-import { clampZ, findFree, newPart, placeOnTable, RESIZABLE, type Axis, type Cable, type CableEnd, type Part, type Project, type PropValue, type Vec3 } from "../core/model/project";
+import { clampZ, extent, findFree, newPart, placeOnTable, RESIZABLE, rotateLocal, type Axis, type Cable, type CableEnd, type Part, type Project, type PropValue, type Vec3 } from "../core/model/project";
 import { detachFrom, endPos, posKey, reattach, termWorld } from "../core/model/terminals";
 import { snapRotor } from "../core/mechanical/snap";
 import { isRotor } from "../core/mechanical/axes";
 import { solveTrain, type Train } from "../core/mechanical/train";
-import { alignedPairs, holesOf, restHeight, snapHoles, type HoleRef } from "../core/model/holes";
-import { checkStructure, type StructureCheck } from "../core/model/structure";
+import { alignedPairs, restHeight, snapHoles, type HoleRef } from "../core/model/holes";
+import { checkStructure, contactSpot, type StructureCheck } from "../core/model/structure";
+import { centered, isSimple, parseShape, shapeText, type Pt } from "../core/model/polygon";
 import type { Joint } from "../core/model/project";
+import { demoProject, wire } from "../core/persistence/examples";
 
 /** Junta que se ofrece al soltar una pieza con un agujero alineado. */
 export interface JointOffer {
@@ -17,6 +19,17 @@ export interface JointOffer {
   p: Vec3;
   /** Uno de los agujeros es la punta del eje de un motor. */
   shaft: boolean;
+}
+
+/** Pieza libre con su forma recentrada en su caja, sin moverse en la mesa. */
+function recentered(p: Part, pts: Pt[]): { x: number; y: number; z: number; props: { shape: string } } {
+  const c = centered(pts);
+  const shape = shapeText(c.pts);
+  const ez0 = extent(p)[2];
+  const d = rotateLocal([c.off[0], c.off[1], 0], p.rot);
+  const ez1 = extent({ ...p, props: { ...p.props, shape } })[2];
+  const r = (v: number) => Math.round(v * 10) / 10;
+  return { x: r(p.x + d[0]), y: r(p.y + d[1]), z: r(p.z + ez0 / 2 + d[2] - ez1 / 2), props: { shape } };
 }
 
 /** Proyecto con los sensores que la simulación está presionando. */
@@ -72,7 +85,7 @@ interface ProjectState {
   jointTap: (id: number, at: Vec3) => void;
   setJointKind: (id: number, kind: Joint["kind"]) => void;
   /** Poniendo una correa: null = no; first = primera polea tocada. */
-  beltMode: { first: number | null } | null;
+  beltMode: { first: number | null; rope?: boolean } | null;
   /** Posición de la pieza al empezar a arrastrarla (para deshacer). */
   dragFrom: Pick<Part, "x" | "y" | "z" | "rot"> | null;
   /** Toque en una pieza mientras se pone una correa. */
@@ -117,77 +130,42 @@ interface ProjectState {
   /** Qué hace arrastrar el cuerpo de un cable seleccionado. */
   cableMode: "move" | "bend";
   setCableMode: (m: "move" | "bend") => void;
+  /** Dibujando una pieza libre: vértices puestos en la mesa (mm). */
+  drawMode: { pts: Pt[]; msg?: string } | null;
+  drawAdd: (x: number, y: number) => void;
+  drawUndo: () => void;
+  drawCancel: () => void;
+  /** Cierra la forma y crea la pieza. Devuelve false si la forma no sirve. */
+  drawFinish: () => boolean;
+  /** Pegando: la primera pieza tocada y, si hace falta, un aviso. */
+  glueMode: { first: number | null; msg?: string } | null;
+  glueTap: (id: number) => void;
+  /** Qué hace arrastrar una pieza libre seleccionada: moverla o editar su forma. */
+  shapeMode: "move" | "edit";
+  setShapeMode: (m: "move" | "edit") => void;
+  /** Vértice elegido de la pieza libre (para quitarlo). */
+  selVertex: number | null;
+  selectVertex: (i: number | null) => void;
+  /** Forma y posición al empezar a editar (para deshacer). */
+  shapeFrom: { x: number; y: number; z: number; shape: string } | null;
+  beginShape: (id: number) => void;
+  /** Cambia la forma en vivo, sin historial. Devuelve false si los lados se cruzarían. */
+  shapeLive: (id: number, pts: Pt[]) => boolean;
+  endShape: (id: number) => void;
+  /** Agrega un vértice en el medio del lado i. */
+  insertVertex: (id: number, edge: number) => void;
+  removeVertex: (id: number, i: number) => void;
   /** Cambia la forma de un cable en vivo, sin historial. */
   setCableLive: (id: number, shape: CableShape) => void;
   /** Deja el cable recto otra vez. */
   straighten: (id: number) => void;
   undo: () => void;
   redo: () => void;
+  /** Reemplaza la mesa por otro proyecto (ejemplo, archivo o guardado). No se puede deshacer. */
+  load: (project: Project) => void;
 }
 
 const isCable = (p: Project, id: number) => p.cables.some((c) => c.id === id);
-
-function wire(id: number, a: Part, ta: number, b: Part, tb: number): Cable {
-  const [x0, y0, z0] = termWorld(a, ta), [x1, y1, z1] = termWorld(b, tb);
-  return { id, ends: [{ att: { part: a.id, t: ta }, x: x0, y: y0, z: z0 }, { att: { part: b.id, t: tb }, x: x1, y: y1, z: z1 }] };
-}
-
-/** Ejemplo inicial: el circuito de la ampolleta y un tren de engranajes. */
-/** Corre la pieza para que su agujero h quede justo en el punto p. */
-function onHole(part: Part, h: number, p: Vec3): Part {
-  const hole = holesOf(part)[h]!;
-  return { ...part, x: part.x + p[0] - hole.p[0], y: part.y + p[1] - hole.p[1], z: part.z + p[2] - hole.p[2] };
-}
-
-function sample(): Project {
-  const P = (id: number, type: string, x: number, y: number, rz = 0, props: Part["props"] = {}, z = 0): Part => ({ id, type, x, y, z, rot: [0, 0, rz], props });
-  const bat = P(1, "source", -220, 40, 0, { v: 9 });
-  const sw = P(2, "switch", -90, 130);
-  const res = P(3, "resistor", 30, 130, 0, { r: 100 });
-  const lamp = P(4, "lamp", 60, 10, 0, { vn: 6 });
-  // Motor de pie sobre una placa: en su eje, un engranaje de 10 que mueve uno de 40 y un brazo
-  // de dos tramos (eslabón y perfil) unidos por juntas rotacionales.
-  const plate = P(13, "plate", 200, -40, 0, { lx: 200, ly: 160 });
-  const motor: Part = { id: 14, type: "dcmotor", x: 180, y: -40, z: 6, rot: [0, 3, 0], props: { rpm: 30, torque: 0.8, vnom: 12 } };
-  const g10: Part = { id: 15, type: "gear10", x: 180, y: -40, z: 57, rot: [0, 0, 0], props: {} };
-  const axle: Part = { id: 16, type: "shaft", x: 230, y: -40, z: 6, rot: [0, 3, 0], props: { lx: 60 } };
-  const g40: Part = { id: 17, type: "gear40", x: 230, y: -40, z: 57, rot: [0, 0, 0], props: {} };
-  const link: Part = { id: 18, type: "link", x: 203, y: -40, z: 66, rot: [0, 0, 0], props: { lx: 60 } };
-  const arm: Part = { id: 19, type: "profile60", x: 251, y: -40, z: 72, rot: [0, 0, 0], props: {} };
-  const bat2 = P(20, "source", 70, -120, 0, { v: 12 });
-  const parts: Part[] = [bat, sw, res, lamp, P(8, "profile240", -60, -80), plate, motor, g10, axle, g40, link, arm, bat2];
-  const cables = [wire(9, bat, 1, sw, 0), wire(10, sw, 1, res, 0), wire(11, res, 1, lamp, 1), wire(12, lamp, 0, bat, 0),
-    wire(21, bat2, 1, motor, 1), wire(22, motor, 0, bat2, 0)];
-  // Brazo robótico de 3 servos alimentado con 6 V: la base gira 180° sobre la placa, y una
-  // escuadra lleva el hombro y el codo de lado, para que el brazo suba y baje.
-  const plate2 = P(30, "plate", -200, -200, 0, { lx: 160, ly: 120 });
-  const servo1: Part = { id: 31, type: "servo", x: -220, y: -190, z: 6, rot: [0, 0, 0], props: { target: 45, speed: 60, torque: 0.8 } };
-  const side: Vec3 = [1, 0, 0]; // de lado: el brazo del servo mira hacia −Y y el ángulo positivo sube
-  const bracket = onHole({ id: 43, type: "bracket", x: 0, y: 0, z: 0, rot: [0, 0, 0], props: {} }, 3, holesOf(servo1)[2]!.p);
-  const servo2 = onHole({ id: 33, type: "servo", x: 0, y: 0, z: 0, rot: side, props: { target: 40, speed: 60, torque: 0.8 } }, 0, holesOf(bracket)[6]!.p);
-  const link1 = onHole({ id: 32, type: "link", x: 0, y: 0, z: 0, rot: side, props: { lx: 90 } }, 1, holesOf(servo2)[2]!.p);
-  const servo3 = onHole({ id: 44, type: "servo", x: 0, y: 0, z: 0, rot: side, props: { target: -60, speed: 60, torque: 0.8 } }, 0, holesOf(link1)[2]!.p);
-  const link2 = onHole({ id: 34, type: "link", x: 0, y: 0, z: 0, rot: side, props: { lx: 80 } }, 1, holesOf(servo3)[2]!.p);
-  const bat3 = P(35, "source", -330, -110, 0, { v: 6 });
-  parts.push(plate2, servo1, bracket, servo2, link1, servo3, link2, bat3);
-  cables.push(wire(36, bat3, 1, servo1, 1), wire(37, bat3, 0, servo1, 0), wire(38, servo1, 1, servo2, 1), wire(39, servo1, 0, servo2, 0),
-    wire(45, servo2, 1, servo3, 1), wire(46, servo2, 0, servo3, 0));
-  const base: Project = { parts, cables, belts: [], nextId: 47 };
-  // Juntas: el eslabón en el eje del motor y el perfil sobre el otro extremo del eslabón.
-  const onShaft = alignedPairs(base, 18).find((q) => q.shaft);
-  const elbow = alignedPairs(base, 19).find((q) => q.b.part === 18);
-  const joints: Joint[] = [];
-  if (onShaft) joints.push({ id: 23, kind: "revolute", a: onShaft.a, b: onShaft.b });
-  if (elbow) joints.push({ id: 24, kind: "revolute", a: elbow.a, b: elbow.b });
-  joints.push(
-    { id: 40, kind: "revolute", a: { part: 43, h: 3 }, b: { part: 31, h: 2 } }, // base: la escuadra gira sobre el servo 1
-    { id: 41, kind: "fixed", a: { part: 33, h: 0 }, b: { part: 43, h: 6 } }, // servo 2 atornillado de lado a la escuadra
-    { id: 42, kind: "revolute", a: { part: 32, h: 1 }, b: { part: 33, h: 2 } }, // hombro: eslabón 1 en el servo 2
-    { id: 47, kind: "fixed", a: { part: 44, h: 0 }, b: { part: 32, h: 2 } }, // servo 3 atornillado al final del eslabón 1
-    { id: 48, kind: "revolute", a: { part: 34, h: 1 }, b: { part: 44, h: 2 } }, // codo: eslabón 2 en el servo 3
-  );
-  return { ...base, joints, nextId: 49 };
-}
 
 export const useProject = create<ProjectState>((set, get) => {
   const commit = (c: Command | null) => {
@@ -199,7 +177,7 @@ export const useProject = create<ProjectState>((set, get) => {
   const part = (id: number) => get().project.parts.find((p) => p.id === id);
   const cable = (id: number) => get().project.cables.find((c) => c.id === id);
   const setCables = (cables: Cable[]) => set({ project: { ...get().project, cables } });
-  const initial = sample();
+  const initial = demoProject();
   /** Tras soltar una pieza: si quedó un agujero alineado sin junta, se ofrece una. */
   const offerJoint = (id: number) => {
     const s = get();
@@ -233,6 +211,8 @@ export const useProject = create<ProjectState>((set, get) => {
       set({ jointOffer: null, selected: id });
     },
     dismissJoint: () => set({ jointOffer: null }),
+    load: (project) =>
+      set({ project, history: emptyHistory(), selected: null, dragging: null, dragFrom: null, pending: null, jointOffer: null, jointTool: null, beltMode: null, pressed: {}, drawMode: null, glueMode: null, selVertex: null, shapeFrom: null }),
     jointTap: (id, at) => {
       const s = get();
       const kind = s.jointTool;
@@ -254,9 +234,18 @@ export const useProject = create<ProjectState>((set, get) => {
       const s = get();
       const bm = s.beltMode;
       const p = part(id);
-      if (!bm || !p || !p.type.startsWith("pulley")) return;
-      if (bm.first === null) { set({ beltMode: { first: id }, selected: id }); return; }
+      if (!bm || !p) return;
+      // La cuerda va de una polea tambor a cualquier pieza que no gire con el tren.
+      if (bm.first === null) { if (p.type.startsWith("pulley")) set({ beltMode: { ...bm, first: id }, selected: id }); return; }
       if (bm.first === id) return;
+      if (bm.rope) {
+        if (isRotor(p.type)) return;
+        const rid = s.project.nextId;
+        commit({ kind: "addBelt", belt: { id: rid, a: bm.first, b: id, cross: false, rope: true } });
+        set({ beltMode: null, selected: rid });
+        return;
+      }
+      if (!p.type.startsWith("pulley")) return;
       const belts = s.project.belts ?? [];
       const exists = belts.some((b) => (b.a === bm.first && b.b === id) || (b.a === id && b.b === bm.first));
       const bid = s.project.nextId;
@@ -267,14 +256,22 @@ export const useProject = create<ProjectState>((set, get) => {
       const b = (get().project.belts ?? []).find((x) => x.id === id);
       if (b) commit({ kind: "updateBelt", id, before: b.cross, after: !b.cross });
     },
-    select: (selected) => set({ selected, pending: null, beltMode: null, jointTool: null, jointOffer: null }),
+    select: (selected) => set({ selected, pending: null, beltMode: null, jointTool: null, jointOffer: null, glueMode: null, selVertex: null }),
     setRotAxis: (rotAxis) => set({ rotAxis }),
     run: commit,
 
     addNear: (type, x, y) => {
       const s = get();
-      if (type === "belt") {
-        set({ beltMode: { first: null }, selected: null, pending: null, jointTool: null });
+      if (type === "draw") {
+        set({ drawMode: { pts: [] }, glueMode: null, beltMode: null, jointTool: null, selected: null, pending: null });
+        return -1;
+      }
+      if (type === "glue") {
+        set({ glueMode: { first: null }, drawMode: null, beltMode: null, jointTool: null, selected: null, pending: null });
+        return -1;
+      }
+      if (type === "belt" || type === "rope") {
+        set({ beltMode: { first: null, rope: type === "rope" }, selected: null, pending: null, jointTool: null });
         return -1;
       }
       if (type === "bolt" || type === "joint") {
@@ -516,6 +513,96 @@ export const useProject = create<ProjectState>((set, get) => {
     },
     cableMode: "move",
     setCableMode: (cableMode) => set({ cableMode }),
+
+    drawMode: null,
+    drawAdd: (x, y) => {
+      const d = get().drawMode;
+      if (d) set({ drawMode: { pts: [...d.pts, [x, y]] } });
+    },
+    drawUndo: () => {
+      const d = get().drawMode;
+      if (d) set({ drawMode: { pts: d.pts.slice(0, -1) } });
+    },
+    drawCancel: () => set({ drawMode: null }),
+    drawFinish: () => {
+      const s = get(), d = s.drawMode;
+      if (!d) return false;
+      if (d.pts.length < 3 || !isSimple(d.pts)) {
+        set({ drawMode: { pts: d.pts, msg: d.pts.length < 3 ? "Pon al menos 3 puntos." : "Los lados se cruzan: quita el último punto y prueba otro camino." } });
+        return false;
+      }
+      const c = centered(d.pts);
+      const p = newPart(s.project, "custom", c.off[0], c.off[1]);
+      p.props = { ...p.props, shape: shapeText(c.pts) };
+      commit({ kind: "add", part: p });
+      set({ drawMode: null, selected: p.id, shapeMode: "move" });
+      return true;
+    },
+
+    glueMode: null,
+    glueTap: (id) => {
+      const s = get(), g = s.glueMode;
+      if (!g) return;
+      if (g.first === null || g.first === id) { set({ glueMode: { first: id }, selected: id }); return; }
+      const a = part(g.first), b = part(id);
+      if (!a || !b) return;
+      if (!contactSpot(a, b)) {
+        set({ glueMode: { first: g.first, msg: "Esas piezas no se tocan: júntalas y vuelve a intentarlo." } });
+        return;
+      }
+      const same = (s.project.joints ?? []).find((j) => j.kind === "glue" && ((j.a.part === a.id && j.b.part === b.id) || (j.a.part === b.id && j.b.part === a.id)));
+      const jid = same?.id ?? s.project.nextId;
+      if (!same) commit({ kind: "addJoint", joint: { id: jid, kind: "glue", a: { part: a.id, h: -1 }, b: { part: b.id, h: -1 } } });
+      set({ glueMode: null, selected: jid });
+    },
+
+    shapeMode: "move",
+    setShapeMode: (shapeMode) => set({ shapeMode, selVertex: null }),
+    selVertex: null,
+    selectVertex: (selVertex) => set({ selVertex }),
+    shapeFrom: null,
+    beginShape: (id) => {
+      const p = part(id);
+      if (p) set({ shapeFrom: { x: p.x, y: p.y, z: p.z, shape: String(p.props.shape) } });
+    },
+    shapeLive: (id, pts) => {
+      if (!isSimple(pts)) return false;
+      const s = get();
+      set({ project: { ...s.project, parts: s.project.parts.map((p) => (p.id === id ? { ...p, props: { ...p.props, shape: shapeText(pts) } } : p)) } });
+      return true;
+    },
+    endShape: (id) => {
+      const s = get(), p = part(id), from = s.shapeFrom;
+      set({ shapeFrom: null });
+      if (!p || !from) return;
+      const after = recentered(p, parseShape(p.props.shape));
+      if (from.shape === after.props.shape && from.x === after.x && from.y === after.y && from.z === after.z) return;
+      const cmd: Command = {
+        kind: "update", id,
+        before: { x: from.x, y: from.y, z: from.z, props: { shape: from.shape } },
+        after: { x: after.x, y: after.y, z: after.z, props: { shape: after.props.shape } },
+      };
+      set({ project: apply({ ...s.project, parts: s.project.parts.map((q) => (q.id === id ? { ...q, x: from.x, y: from.y, z: from.z, props: { ...q.props, shape: from.shape } } : q)) }, cmd), history: record(s.history, cmd) });
+    },
+    insertVertex: (id, edge) => {
+      const p = part(id);
+      const pts = p ? parseShape(p.props.shape) : [];
+      if (!p || !pts.length) return;
+      const a = pts[edge]!, b = pts[(edge + 1) % pts.length]!;
+      const next = [...pts.slice(0, edge + 1), [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2] as Pt, ...pts.slice(edge + 1)];
+      commit(updateCmd(get().project, id, { props: { shape: shapeText(next) } }));
+      set({ selVertex: edge + 1 });
+    },
+    removeVertex: (id, i) => {
+      const p = part(id);
+      const pts = p ? parseShape(p.props.shape) : [];
+      if (!p || pts.length <= 3) return;
+      const next = pts.filter((_, k) => k !== i);
+      if (!isSimple(next)) return;
+      const r = recentered(p, next);
+      commit(updateCmd(get().project, id, { x: r.x, y: r.y, z: r.z, props: { shape: r.props.shape } }));
+      set({ selVertex: null });
+    },
     setCableLive: (id, shape) => setCables(get().project.cables.map((c) => (c.id === id ? { ...c, ends: shape.ends, bend: shape.bend ?? null } : c))),
     straighten: (id) => {
       const c = cable(id);

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import type { Cable, Project } from "../core/model/project";
-import { endPos, POLAR, posKey, TERMINALS, termWorld } from "../core/model/terminals";
+import { endPos, isPlus, posKey, TERMINALS, termWorld } from "../core/model/terminals";
 import { useProject } from "../store/project";
 import { cableMid, curveOf } from "./cableCurve";
 import { useUI } from "../store/ui";
@@ -23,7 +23,7 @@ export function Terminals() {
         const n = TERMINALS[p.type]?.length ?? 0;
         return Array.from({ length: n }, (_, t) => {
           const pos = termWorld(p, t);
-          const plus = t === 1 && POLAR.has(p.type);
+          const plus = isPlus(p.type, t);
           const pend = pending?.part === p.id && pending.t === t;
           return (
             <group key={`${p.id}:${t}`} position={pos}>

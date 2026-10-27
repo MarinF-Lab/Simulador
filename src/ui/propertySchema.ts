@@ -70,7 +70,6 @@ export function sectionsFor(kind: PartKind): Section[] {
         fields: [
           { type: "number", key: "stroke", label: "Carrera", unit: "mm", min: 10, max: 300, def: 100 },
           { type: "number", key: "lspeed", label: "Velocidad", unit: "mm/s", min: 1, max: 200, def: 20 },
-          { type: "number", key: "force", label: "Fuerza", unit: "N", min: 1, max: 500, def: 30 },
           { type: "number", key: "vnom", label: "Voltaje nominal", unit: "V", min: 0.5, max: 24, def: 12 },
         ],
       }, control];
@@ -103,8 +102,28 @@ export function sectionsFor(kind: PartKind): Section[] {
       return [{ id: "sensor", title: "Lectura", fields: [{ type: "reading", label: "Valor", value: "—" }] }];
     case "text":
       return [{ id: "text", title: "Texto", fields: [{ type: "text", key: "txt", label: "Contenido", def: "Nota" }] }];
-    case "profile":
+    case "controller":
+    case "splitter":
+    case "draw":
+    case "glue":
+      return [];
+    case "custom":
+      return [{
+        id: "custom",
+        title: "Pieza libre",
+        fields: [
+          { type: "number", key: "h", label: "Grosor", unit: "mm", min: 2, max: 40, def: 6 },
+          { type: "select", key: "color", label: "Material", options: ["Madera", "Aluminio", "Acrílico", "Cartón"], def: "Madera" },
+          { type: "select", key: "holes", label: "Agujeros", options: ["Cada 10 mm", "Cada 20 mm", "Sin agujeros"], def: "Cada 10 mm" },
+        ],
+      }];
     case "plate":
+      return [{ id: "plate", title: "Placa", fields: [{ type: "toggle", key: "anchored", label: "Fija a la mesa", def: true }] }];
+    case "wheel":
+    case "piston":
+    case "rope":
+    case "weight":
+    case "profile":
     case "bolt":
     case "bracket":
     case "bearing":

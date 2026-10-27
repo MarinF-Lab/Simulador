@@ -1,7 +1,8 @@
 import { useMemo, type ReactNode } from "react";
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
-import { sizeOf } from "../core/model/project";
+import { DEFAULT_SHAPE, sizeOf } from "../core/model/project";
+import { gridInside, parseShape } from "../core/model/polygon";
 
 // Modelos 3D simples de cada pieza. Cada modelo se arma con la base en z = 0 y centrado
 // en x, y; el contenedor lo baja a la mitad de su alto para que gire sobre su centro.
@@ -182,7 +183,36 @@ export interface ModelState {
   on?: boolean;
 }
 
-function Model({ type, glow = 0, burned = false, on = true, size }: { type: string; size: [number, number, number] } & ModelState) {
+const PCB = mat("#b4542a", { roughness: 0.6 });
+/** Materiales de la pieza libre. */
+export const CUSTOM_MAT: Record<string, THREE.Material> = {
+  Madera: mat("#a87443", { roughness: 0.85 }),
+  Aluminio: mat("#b9c1cc", { roughness: 0.35, metalness: 0.6 }),
+  Acrílico: mat("#86c3ef", { roughness: 0.15, transparent: true, opacity: 0.7 }),
+  Cartón: mat("#bf9f6c", { roughness: 0.95 }),
+};
+const customGeo = new Map<string, THREE.ExtrudeGeometry>();
+
+/** Pieza libre: su forma extruida a su grosor, con los agujeros de la grilla. */
+function CustomPiece({ props }: { props?: Record<string, unknown> }) {
+  const shape = String(props?.shape ?? DEFAULT_SHAPE), h = sizeOf("custom", props)[2];
+  const step = props?.holes === "Cada 20 mm" ? 20 : props?.holes === "Sin agujeros" ? 0 : 10;
+  const holes = step ? gridInside(parseShape(shape), step) : [];
+  const key = `${shape}|${h}|${holes.length}|${String(props?.holes)}`;
+  let geo = customGeo.get(key);
+  if (!geo) {
+    const pts = parseShape(shape);
+    const s = new THREE.Shape(pts.map(([x, y]) => new THREE.Vector2(x, y)));
+    for (const [x, y] of holes) s.holes.push(new THREE.Path().absarc(x, y, 3, 0, Math.PI * 2, true));
+    geo = new THREE.ExtrudeGeometry(s, { depth: h, bevelEnabled: false, curveSegments: 10 });
+    if (customGeo.size > 60) customGeo.clear();
+    customGeo.set(key, geo);
+  }
+  return <mesh geometry={geo} material={CUSTOM_MAT[String(props?.color)] ?? CUSTOM_MAT.Madera} castShadow receiveShadow />;
+}
+const PLASTIC = mat("#e9e6dc", { roughness: 0.7 });
+
+function Model({ type, glow = 0, burned = false, on = true, size, props }: { type: string; size: [number, number, number]; props?: Record<string, unknown> } & ModelState) {
   switch (type) {
     case "source":
       return (
@@ -287,6 +317,20 @@ function Model({ type, glow = 0, burned = false, on = true, size }: { type: stri
           <Box s={[10, 24, 24]} p={[-55, 0, 0]} m={M.dark} />
         </group>
       );
+    case "piston":
+      return (
+        <group>
+          <Box s={[70, 26, 36]} m={M.dark} />
+          <Box s={[110, 30, 4]} p={[0, 0, 36]} m={M.steel} />
+          <Box s={[110, 4, 26]} p={[0, -13, 40]} m={M.steel} />
+          <Box s={[110, 4, 26]} p={[0, 13, 40]} m={M.steel} />
+          {/* El émbolo se corre al simular (ver Part3D). */}
+          <group name="rod">
+            <Box s={[24, 22, 26]} p={[25, 0, 40]} m={M.white} />
+            <Cyl r={3} h={0.6} p={[25, 0, 65.8]} m={M.hole} seg={12} />
+          </group>
+        </group>
+      );
     case "shaft":
       return <Cyl r={4} h={size[0]} p={[0, 0, 4]} axis="x" m={M.steel} />;
     case "gear10":
@@ -309,6 +353,47 @@ function Model({ type, glow = 0, burned = false, on = true, size }: { type: stri
           <Cyl r={11} h={8} m={M.steel} />
           <Cyl r={7.5} h={8.4} p={[0, 0, -0.2]} m={M.dark} />
           <Cyl r={4} h={8.8} p={[0, 0, -0.4]} m={M.hole} seg={12} />
+        </group>
+      );
+    case "weight":
+      return (
+        <group>
+          <Box s={[30, 30, 26]} m={M.dark} />
+          <Box s={[22, 22, 2]} p={[0, 0, 26]} m={M.steel} />
+          <Cyl r={3} h={2.4} p={[0, 0, 27.8]} m={M.hole} seg={12} />
+        </group>
+      );
+    case "custom":
+      return <CustomPiece props={props} />;
+    case "controller":
+      return (
+        <group>
+          <Box s={[70, 50, 2]} m={PCB} />
+          <Box s={[14, 9, 3]} p={[-6, 2, 2]} m={M.black} />
+          <Box s={[8, 6, 2]} p={[12, 4, 2]} m={M.black} />
+          <Cyl r={4} h={8} p={[24, -2, 2]} m={M.black} seg={16} />
+          <Cyl r={1} h={40} p={[30, 14, 2]} m={M.steel} seg={8} />
+          {/* Borneras: entrada a la izquierda y un par por canal arriba y abajo. */}
+          <Box s={[8, 22, 10]} p={[-31, 0, 2]} m={M.dark} />
+          {[-8, 12].flatMap((x) => [21, -21].map((y) => <Box key={`${x}${y}`} s={[18, 7, 10]} p={[x, y, 2]} m={M.dark} />))}
+        </group>
+      );
+    case "splitter":
+      return (
+        <group>
+          <Box s={[80, 24, 10]} m={PLASTIC} />
+          <Box s={[8, 24, 10.4]} p={[-34, 0, -0.2]} m={M.accent} />
+          {[-34, -16, -2, 12, 26].flatMap((x) => [-6, 6].map((y) => <Cyl key={`${x}${y}`} r={2.6} h={4} p={[x, y, 10]} m={M.steel} seg={12} />))}
+        </group>
+      );
+    case "wheel":
+      return (
+        <group>
+          <Cyl r={30} h={14} m={M.rubber} />
+          <Cyl r={20} h={14.4} p={[0, 0, -0.2]} m={M.steel} />
+          <Box s={[36, 5, 14.8]} p={[0, 0, -0.4]} m={M.dark} />
+          <Box s={[5, 36, 14.8]} p={[0, 0, -0.4]} m={M.dark} />
+          <Cyl r={4} h={15.2} p={[0, 0, -0.6]} m={M.hole} seg={12} />
         </group>
       );
     case "support":
@@ -408,7 +493,7 @@ export function PartModel({ type, glow, burned, on, props }: { type: string; pro
   const size = sizeOf(type, props);
   return (
     <group position={[0, 0, -size[2] / 2]}>
-      <Model type={type} glow={glow} burned={burned} on={on} size={size} />
+      <Model type={type} glow={glow} burned={burned} on={on} size={size} props={props} />
     </group>
   );
 }

@@ -1,5 +1,5 @@
 import { lazy, Suspense } from "react";
-import { ArrowLeftRight, Box, Hand, Info, Link2, Maximize, Minus, Move, Plus, Power, RotateCcw, RotateCw, Spline, Trash2, X } from "lucide-react";
+import { ArrowLeftRight, Box, Check, Hand, Info, Link2, Maximize, Minus, Move, PenTool, Plus, Power, RotateCcw, RotateCw, Spline, Trash2, Undo2, X } from "lucide-react";
 import { POLAR } from "../core/model/terminals";
 import { findItem } from "../core/model/catalog";
 import { overlay, sceneApi } from "../scene/api";
@@ -7,6 +7,7 @@ import { useProject } from "../store/project";
 import { useUI } from "../store/ui";
 import { useIssues } from "./useIssues";
 import { PartIcon } from "./PartIcon";
+import { RemotePanel } from "./Channels";
 
 const Scene = lazy(() => import("../scene/Scene").then((m) => ({ default: m.Scene })));
 
@@ -59,17 +60,34 @@ export function Workspace() {
       ? { label: selProps?.pressed === true ? "Soltar" : "Presionar", on: selProps?.pressed === true, Icon: Hand }
       : null;
   const item = type ? findItem(type) : undefined;
+  const draw = useProject((s) => s.drawMode);
+  const glue = useProject((s) => s.glueMode);
+  const { shapeMode, setShapeMode, selVertex, removeVertex, drawUndo, drawCancel, drawFinish } = useProject();
 
-  const hint = jointTool
+  const hint = draw
+    ? draw.msg ?? (draw.pts.length === 0
+      ? "Toca la mesa para poner el primer vértice de la pieza. Puedes mover la vista arrastrando."
+      : draw.pts.length < 3
+        ? "Sigue tocando la mesa para agregar vértices."
+        : "Agrega más vértices, o toca Listo o el primer punto (verde) para cerrar la forma.")
+    : glue
+    ? glue.msg ?? (glue.first === null ? "Toca la primera pieza que quieres pegar. Toca el fondo para cancelar." : "Ahora toca la pieza que la toca para pegarlas.")
+    : type === "custom" && shapeMode === "edit" && !running
+    ? "Arrastra los puntos blancos (vértices) o los cuadrados (lados). Toca un cuadrado para agregar un vértice; toca un vértice para elegirlo y quitarlo."
+    : jointTool
     ? `Toca una pieza que tenga un agujero alineado con otra para poner ${jointTool === "fixed" ? "una unión fija" : "una junta rotacional"}. Toca el fondo para cancelar.`
     : offer
     ? offer.shaft
       ? "La pieza quedó sobre el eje del motor: móntala para que gire con él."
       : "Dos agujeros quedaron alineados: elige junta rotacional (gira) o unión fija (perno)."
     : selJoint
-    ? selJoint.kind === "revolute" ? "Junta rotacional: las piezas giran sobre este agujero al simular." : "Unión fija: las piezas quedan unidas como con un perno."
+    ? selJoint.kind === "revolute" ? "Junta rotacional: las piezas giran sobre este agujero al simular." : selJoint.kind === "glue" ? "Pegamento: las piezas quedan unidas donde se tocan." : "Unión fija: las piezas quedan unidas como con un perno."
     : beltMode
-    ? beltMode.first === null
+    ? beltMode.rope
+      ? beltMode.first === null
+        ? "Toca la polea tambor que enrollará la cuerda. Toca el fondo para cancelar."
+        : "Ahora toca la pieza que colgará de la cuerda."
+      : beltMode.first === null
       ? "Toca la primera polea que unirá la correa. Toca el fondo para cancelar."
       : "Ahora toca la segunda polea. Deben quedar paralelas y en el mismo plano."
     : pending
@@ -98,7 +116,21 @@ export function Workspace() {
         <Scene />
       </Suspense>
 
-      <div ref={(el) => { overlay.partTools = el; }} hidden className="absolute top-0 left-0 z-10 flex gap-2">
+      <div ref={(el) => { overlay.partTools = el; }} hidden className="absolute top-0 left-0 z-10 flex flex-wrap gap-2">
+        {!running && type === "custom" && (
+          <div role="radiogroup" aria-label="Al arrastrar la pieza" className="flex rounded-full border border-line bg-panel p-1 shadow-lg">
+            {([["move", "Mover", Move], ["edit", "Editar forma", PenTool]] as const).map(([m, label, Icon]) => (
+              <button key={m} role="radio" aria-checked={shapeMode === m} onClick={() => setShapeMode(m)} className={"flex min-h-9 items-center gap-1.5 rounded-full px-3 text-xs font-semibold " + (shapeMode === m ? "bg-accent text-accent-ink" : "text-muted")}>
+                <Icon className="size-4" aria-hidden="true" /> {label}
+              </button>
+            ))}
+          </div>
+        )}
+        {!running && type === "custom" && shapeMode === "edit" && selVertex !== null && (
+          <button onClick={() => selected !== null && removeVertex(selected, selVertex)} className="flex min-h-11 items-center gap-1.5 rounded-full border border-err/60 bg-panel px-4 text-sm font-semibold text-err shadow-lg">
+            <X className="size-4" aria-hidden="true" /> Quitar vértice
+          </button>
+        )}
         {!running && type && POLAR.has(type) && (
           <button onClick={() => selected !== null && flip(selected)} className="flex min-h-11 items-center gap-1.5 rounded-full border border-line bg-panel px-4 text-sm font-semibold text-ink shadow-lg">
             <ArrowLeftRight className="size-4" aria-hidden="true" /> {type === "dcmotor" ? "Invertir giro" : "Invertir polaridad"}
@@ -145,6 +177,7 @@ export function Workspace() {
         </button>
       </div>
 
+      {running && <RemotePanel />}
       {running && (
         <span className="pointer-events-none absolute top-14 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full border border-ok/40 bg-panel px-3 py-1 text-xs font-medium text-ok">
           <span className="size-2 rounded-full bg-ok motion-safe:animate-pulse" aria-hidden="true" />
@@ -178,13 +211,13 @@ export function Workspace() {
       </div>
 
       <div ref={(el) => { overlay.jointTools = el; }} hidden className="absolute top-0 left-0 z-10 flex items-center gap-2">
-        <div role="radiogroup" aria-label="Tipo de junta" className="flex rounded-full border border-line bg-panel p-1 shadow-lg">
+        {selJoint?.kind !== "glue" && <div role="radiogroup" aria-label="Tipo de junta" className="flex rounded-full border border-line bg-panel p-1 shadow-lg">
           {([["revolute", "Rotacional"], ["fixed", "Fija"]] as const).map(([k, label]) => (
             <button key={k} role="radio" aria-checked={selJoint?.kind === k} onClick={() => selJoint && setJointKind(selJoint.id, k)} className={"min-h-9 rounded-full px-3 text-xs font-semibold " + (selJoint?.kind === k ? "bg-accent text-accent-ink" : "text-muted")}>
               {label}
             </button>
           ))}
-        </div>
+        </div>}
         <button onClick={() => selected !== null && remove(selected)} aria-label="Eliminar junta" className="grid size-11 place-items-center rounded-full bg-err text-white shadow-lg">
           <Trash2 className="size-5" />
         </button>
@@ -209,6 +242,20 @@ export function Workspace() {
         <button className={viewBtn} onClick={() => sceneApi.rotateView(1)} aria-label="Girar vista 90°" title="Girar vista 90°"><RotateCcw className="size-5" /></button>
         <button className={viewBtn} onClick={() => sceneApi.isoView()} aria-label="Vista isométrica" title="Vista isométrica"><Box className="size-5" /></button>
       </div>
+
+      {draw && (
+        <div role="toolbar" aria-label="Dibujar pieza" className="absolute inset-x-0 bottom-[calc(150px+env(safe-area-inset-bottom,0px))] z-10 flex justify-center gap-2 lg:bottom-20">
+          <button onClick={drawCancel} className="flex min-h-11 items-center gap-1.5 rounded-full border border-line bg-panel px-4 text-sm font-semibold shadow-lg">
+            <X className="size-4" aria-hidden="true" /> Cancelar
+          </button>
+          <button onClick={drawUndo} disabled={!draw.pts.length} className="flex min-h-11 items-center gap-1.5 rounded-full border border-line bg-panel px-4 text-sm font-semibold shadow-lg disabled:opacity-40">
+            <Undo2 className="size-4" aria-hidden="true" /> Quitar punto
+          </button>
+          <button onClick={() => drawFinish()} disabled={draw.pts.length < 3} className="flex min-h-11 items-center gap-1.5 rounded-full bg-accent px-4 text-sm font-semibold text-accent-ink shadow-lg disabled:opacity-40">
+            <Check className="size-4" aria-hidden="true" /> Listo
+          </button>
+        </div>
+      )}
 
       <div className="pointer-events-none absolute inset-x-3 bottom-[calc(76px+env(safe-area-inset-bottom,0px))] flex items-end gap-3 lg:bottom-3">
         <Axes />

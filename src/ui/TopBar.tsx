@@ -23,10 +23,14 @@ export function TopBar() {
   return (
     <header className="z-20 border-b border-line bg-panel pl-[max(12px,env(safe-area-inset-left,0px))] pr-[max(12px,env(safe-area-inset-right,0px))]">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 py-1.5 lg:flex-nowrap lg:gap-4">
-        <div className="flex min-w-0 items-center gap-2.5">
-          <Logo />
+        {/* El símbolo hace de K: al lado va "INETIC" y juntos se leen KINETIC. */}
+        <div className="flex min-w-0 items-center gap-0.5">
+          <Logo className="size-10" />
           <div className="min-w-0">
-            <p className="font-display text-lg leading-none font-bold tracking-wide">KINETIC</p>
+            <p className="font-display text-xl leading-none font-bold tracking-wide">
+              <span className="sr-only">KINETIC</span>
+              <span aria-hidden="true" className="bg-gradient-to-r from-[#6a4dff] via-[#3d6bff] to-[#22d3ee] bg-clip-text text-transparent">INETIC</span>
+            </p>
             <p className="hidden text-xs text-muted sm:block">Circuitos y Mecanismos</p>
           </div>
         </div>

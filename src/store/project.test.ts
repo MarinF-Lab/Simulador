@@ -254,3 +254,30 @@ describe("colocación sin imán", async () => {
     useUI.getState().setMagnet(false);
   });
 });
+
+describe("altura editable", async () => {
+  const { sizeOf } = await import("../core/model/project");
+  const { holesOf } = await import("../core/model/holes");
+
+  it("el alto de una placa cambia de a 1 mm, mueve sus agujeros y se deshace", () => {
+    const st = useProject.getState();
+    st.load({ parts: [{ id: 1, type: "plate", x: 0, y: 0, z: 0, rot: [0, 0, 0], props: {} }], cables: [], belts: [], joints: [], nextId: 2 });
+    useProject.getState().setSize(1, "lz", 20.4);
+    const p = useProject.getState().project.parts[0]!;
+    expect(sizeOf(p.type, p.props)[2]).toBe(20);
+    const zs = new Set(holesOf(p).map((h) => h.p[2]));
+    expect([...zs].sort((a, b) => a - b)).toEqual([0, 20]);
+    useProject.getState().undo();
+    const q = useProject.getState().project.parts[0]!;
+    expect(sizeOf(q.type, q.props)[2]).toBe(6);
+  });
+
+  it("escribir la altura la lleva ahí, o se detiene al tocar otra pieza", () => {
+    const sq = (id: number, z: number) => ({ id, type: "custom", x: 0, y: 0, z, rot: [0, 0, 0] as [number, number, number], props: { shape: "-20,-20;20,-20;20,20;-20,20", h: 6, holes: "Sin agujeros" } });
+    const st = useProject.getState();
+    st.load({ parts: [sq(1, 0), sq(2, 30)], cables: [], belts: [], joints: [], nextId: 3 });
+    expect(useProject.getState().moveZTo(1, 15)).toBe(15);
+    expect(useProject.getState().moveZTo(1, 100)).toBeCloseTo(24, 0);
+    expect(useProject.getState().project.parts[0]!.z).toBeCloseTo(24, 0);
+  });
+});

@@ -169,25 +169,29 @@ function SizeEditor({ id }: { id: number }) {
   if (!part) return null;
   const spec = RESIZABLE[part.type];
   if (!spec) return null;
-  const [lx, ly] = sizeOf(part.type, part.props);
-  const row = (key: "lx" | "ly", label: string, value: number, range: [number, number]) => (
+  const [lx, ly, lz] = sizeOf(part.type, part.props);
+  const row = (key: "lx" | "ly" | "lz", label: string, value: number, range: [number, number]) => {
+    const step = key === "lz" ? 1 : 10;
+    return (
     <div key={key} className="flex min-h-11 items-center justify-between gap-3 text-sm">
       <label htmlFor={`size-${id}-${key}`}>{label} <span className="text-muted">(mm)</span></label>
       <span className="flex items-center gap-2">
-        <button className={sq} onClick={() => setSize(id, key, value - 10)} disabled={value <= range[0]} aria-label={`${label}: 10 mm menos`}>−</button>
+        <button className={sq} onClick={() => setSize(id, key, value - step)} disabled={value <= range[0]} aria-label={`${label}: ${step} mm menos`}>−</button>
         <NumberInput id={`size-${id}-${key}`} label={`${label} en mm`} value={value} min={range[0]} max={range[1]} onChange={(v) => setSize(id, key, v)} />
-        <button className={sq} onClick={() => setSize(id, key, value + 10)} disabled={value >= range[1]} aria-label={`${label}: 10 mm más`}>+</button>
+        <button className={sq} onClick={() => setSize(id, key, value + step)} disabled={value >= range[1]} aria-label={`${label}: ${step} mm más`}>+</button>
       </span>
     </div>
-  );
+    );
+  };
   return (
     <section className="rounded-xl border border-line px-3 py-2">
       <h3 className="pb-1 text-xs font-semibold tracking-widest text-muted uppercase">Tamaño</h3>
       <div className="flex flex-col divide-y divide-line/60">
         {spec.lx && row("lx", "Largo", lx, spec.lx)}
         {spec.ly && row("ly", "Ancho", ly, spec.ly)}
+        {spec.lz && row("lz", "Alto", lz, spec.lz)}
       </div>
-      <p className="pb-1 text-xs text-muted">Los agujeros van cada 10 mm y se ajustan solos al cambiar el tamaño.</p>
+      <p className="pb-1 text-xs text-muted">Los agujeros se ajustan solos al cambiar el tamaño. El alto crece hacia arriba desde la base.</p>
     </section>
   );
 }
@@ -209,8 +213,12 @@ function WhatIsIt({ desc }: { desc: string }) {
 
 function Placement({ id }: { id: number }) {
   const part = useProject((s) => s.project.parts.find((p) => p.id === id));
-  const { setZ, rotate, rotAxis, setRotAxis } = useProject();
+  const { nudgeZ, moveZTo, rotate, rotAxis, setRotAxis } = useProject();
+  const magnet = useUI((s) => s.magnet);
+  const [stopped, setStopped] = useState(false);
+  useEffect(() => setStopped(false), [id]);
   if (!part) return null;
+  const step = magnet ? 10 : 1;
   const [ex, ey, ez] = extent(part);
   return (
     <section className="rounded-xl border border-line px-3 py-2">
@@ -223,11 +231,12 @@ function Placement({ id }: { id: number }) {
         <div className="flex min-h-11 items-center justify-between gap-3">
           <span>Altura (Z)</span>
           <span className="flex items-center gap-2">
-            <button className={sq} onClick={() => setZ(id, part.z - 10)} disabled={part.z <= 0} aria-label="Bajar 10 mm"><ChevronDown className="size-5" /></button>
-            <span className="w-16 text-center font-mono tabular-nums">{fmt(part.z)} mm</span>
-            <button className={sq} onClick={() => setZ(id, part.z + 10)} aria-label="Subir 10 mm"><ChevronUp className="size-5" /></button>
+            <button className={sq} onClick={() => { setStopped(false); nudgeZ(id, -1); }} disabled={part.z <= 0} aria-label={`Bajar ${step} mm`}><ChevronDown className="size-5" /></button>
+            <NumberInput id={`z-${id}`} label="Altura sobre la mesa en mm" value={part.z} min={0} max={400} onChange={(v) => { const got = moveZTo(id, v); setStopped(Math.abs(got - Math.round(v * 10) / 10) > 0.05); }} />
+            <button className={sq} onClick={() => { setStopped(false); nudgeZ(id, 1); }} aria-label={`Subir ${step} mm`}><ChevronUp className="size-5" /></button>
           </span>
         </div>
+        {stopped && <p className="py-1 text-xs text-warn" role="status">Se detuvo al tocar otra pieza.</p>}
         <div className="flex min-h-11 items-center justify-between gap-3">
           <span>Girar 90° sobre</span>
           <span className="flex items-center gap-1.5">

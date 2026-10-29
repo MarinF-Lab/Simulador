@@ -52,7 +52,7 @@ const cache = new Map<string, LocalHole[]>();
 
 function localHoles(part: Pick<Part, "type" | "props">): LocalHole[] {
   const [lx, ly, h] = sizeOf(part.type, part.props);
-  const key = part.type === "custom" ? `custom:${String(part.props.shape)}:${String(part.props.holes)}:${String(part.props.drill ?? "")}:${h}` : `${part.type}:${lx}:${ly}`;
+  const key = part.type === "custom" ? `custom:${String(part.props.shape)}:${String(part.props.holes)}:${String(part.props.drill ?? "")}:${h}` : `${part.type}:${lx}:${ly}:${h}`;
   const hit = cache.get(key);
   if (hit) return hit;
   let out: LocalHole[] = [];

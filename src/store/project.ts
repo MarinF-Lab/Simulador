@@ -114,12 +114,14 @@ interface ProjectState {
   setZ: (id: number, z: number) => void;
   /** Sube (+1) o baja (−1) la pieza un paso, sin atravesar otras piezas. */
   nudgeZ: (id: number, dir: 1 | -1) => void;
+  /** Lleva la pieza a una altura escrita; se detiene si toca otra pieza. Devuelve la altura final. */
+  moveZTo: (id: number, z: number) => number;
   setProp: (id: number, key: string, v: PropValue) => void;
   replace: (id: number) => void;
   /** Accionar: abre o cierra un interruptor, presiona o suelta un sensor de contacto. */
   actuate: (id: number) => void;
   /** Cambia el largo (lx) o el ancho (ly) de una estructura, de 10 en 10 mm. */
-  setSize: (id: number, key: "lx" | "ly", mm: number) => void;
+  setSize: (id: number, key: "lx" | "ly" | "lz", mm: number) => void;
   /** Sensores presionados por la simulación: cambian el circuito, no el diseño ni el historial. */
   pressed: Record<number, boolean>;
   setPressed: (p: Record<number, boolean>) => void;
@@ -496,6 +498,13 @@ export const useProject = create<ProjectState>((set, get) => {
       const to = sweep(get().project, p, p, { x: p.x, y: p.y, z: clampZ(p.z + dir * step) });
       if (to.z !== p.z) commit(updateCmd(get().project, id, { z: clampZ(to.z) }, `${id}:z`));
     },
+    moveZTo: (id, z) => {
+      const p = part(id);
+      if (!p) return 0;
+      const to = clampZ(sweep(get().project, p, p, { x: p.x, y: p.y, z: clampZ(z) }).z);
+      if (to !== p.z) commit(updateCmd(get().project, id, { z: to }, `${id}:z`));
+      return to;
+    },
     setProp: (id, key, v) => commit(updateCmd(get().project, id, { props: { [key]: v } } as Patch, `${id}:${key}`)),
     replace: (id) => commit(updateCmd(get().project, id, { props: { burned: undefined, burnV: undefined } })),
     pressed: {},
@@ -512,7 +521,8 @@ export const useProject = create<ProjectState>((set, get) => {
       const p = part(id);
       const range = p && RESIZABLE[p.type]?.[key];
       if (!p || !range) return;
-      const v = Math.min(range[1], Math.max(range[0], Math.round(mm / 10) * 10));
+      const step = key === "lz" ? 1 : 10;
+      const v = Math.min(range[1], Math.max(range[0], Math.round(mm / step) * step));
       const next = { ...p, props: { ...p.props, [key]: v } };
       const at = placeOnTable(next, p.x, p.y, stepNow());
       commit(updateCmd(get().project, id, { props: { [key]: v }, ...at }, `${id}:${key}`));

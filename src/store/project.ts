@@ -3,7 +3,7 @@ import { apply, cableDiff, emptyHistory, exec, record, redo, removeCableCmd, rem
 import { analyze, type Circuit } from "../core/electrical/analyze";
 import { clampZ, extent, findFree, newPart, placeOnTable, RESIZABLE, rotateLocal, unrotateLocal, type Axis, type Cable, type CableEnd, type Part, type Project, type PropValue, type Vec3 } from "../core/model/project";
 import { detachFrom, endPos, posKey, reattach, termWorld } from "../core/model/terminals";
-import { snapRotor } from "../core/mechanical/snap";
+import { snapRotor, snapToShaft } from "../core/mechanical/snap";
 import { blockers, dropGroup, restOn, slide, slideGroup, sweep, sweepGroup } from "../core/model/footprint";
 import { useUI } from "./ui";
 import { coaxial, isRotor, motorAxis, rotorAxis } from "../core/mechanical/axes";
@@ -222,6 +222,14 @@ export const useProject = create<ProjectState>((set, get) => {
   };
   const part = (id: number) => get().project.parts.find((p) => p.id === id);
   const stepNow = () => (useUI.getState().magnet ? GRID_MM : 1);
+  /** Si mover la pieza a `at` deja sus juntas y pegamentos funcionando. */
+  const keepsJoints = (project: Project, id: number, at: { x: number; y: number; z: number }) => {
+    const mine = (project.joints ?? []).filter((j) => j.a.part === id || j.b.part === id);
+    if (!mine.length) return true;
+    const moved = { ...project, parts: project.parts.map((q) => (q.id === id ? { ...q, ...at } : q)) };
+    const before = checkStructure(project).broken, after = checkStructure(moved).broken;
+    return mine.every((j) => before.has(j.id) || !after.has(j.id));
+  };
   /** Posición de cada pieza del grupo al empezar a arrastrarlo (null si se arrastra una sola). */
   let groupFrom: Map<number, Pick<Part, "x" | "y" | "z" | "rot">> | null = null;
   /** Al soltar sin imán, la pieza cae hasta apoyarse en lo que tenga debajo (o la mesa). */
@@ -231,6 +239,9 @@ export const useProject = create<ProjectState>((set, get) => {
     if (!p || useUI.getState().magnet || isRotor(p.type) || p.type === "text") return;
     // Las piezas unidas con juntas o pegamento se quedan donde están (las sostiene la unión).
     if ((s.project.joints ?? []).some((j) => j.a.part === id || j.b.part === id)) return;
+    // Centrada en un eje: el eje la sostiene.
+    const sh = snapToShaft(s.project, p, p.x, p.y, 0.3);
+    if (sh && Math.abs(sh.x - p.x) < 0.3 && Math.abs(sh.y - p.y) < 0.3 && Math.abs(sh.z - p.z) < 0.3) return;
     const z = restOn(s.project, p, p.x, p.y, p.z);
     if (z < p.z - 0.05) set({ project: { ...s.project, parts: s.project.parts.map((q) => (q.id === id ? { ...q, z } : q)) } });
   };
@@ -515,7 +526,17 @@ export const useProject = create<ProjectState>((set, get) => {
           }
           return;
         }
-      } else if (magnet) {
+      }
+      // Un agujero de la pieza (o el eje de un motor) cerca de un eje suelto: se centra en él.
+      let onShaft = !isRotor(p.type) ? snapToShaft(s.project, base, x, y, magnet ? 16 : 4) : null;
+      // Sin romper sus uniones: si centrarla en altura despega su pegamento, solo se centra en planta
+      // (los agujeros tienen juego: medio milímetro no impide que el eje pase).
+      if (onShaft && keepsJoints(s.project, id, onShaft) === false) {
+        const flat = { ...onShaft, z: p.z };
+        onShaft = keepsJoints(s.project, id, flat) ? flat : null;
+      }
+      if (onShaft && free(onShaft)) next = onShaft;
+      else if (!isRotor(p.type) && magnet) {
         // Con imán: agujeros primero; si no, la pieza se apoya sobre lo que tenga debajo.
         const h = snapHoles(s.project, base, x, y);
         if (h && free(h)) next = h;

@@ -178,6 +178,7 @@ export function Scene() {
   const parts = useProject((s) => s.project.parts);
   const selected = useProject((s) => s.selected);
   const sel = parts.find((p) => p.id === selected);
+  const multi = useProject((s) => s.multi);
   const eflag = useProject((s) => s.circuit.flag);
   const mflag = useProject((s) => s.mech.flag);
   const sflag = useProject((s) => s.structure.flag);
@@ -204,6 +205,7 @@ export function Scene() {
       {/* Al simular, las piezas se mueven: los marcos, bornes y juntas de diseño se ocultan. */}
       {!running && parts.filter((p) => flag[p.id] && p.id !== selected).map((p) => <OutlineBox key={p.id} part={p} kind={flag[p.id]!} pad={4} />)}
       {!running && sel && <OutlineBox part={sel} kind="sel" />}
+      {!running && parts.filter((p) => multi.includes(p.id) && p.id !== selected).map((p) => <OutlineBox key={`m${p.id}`} part={p} kind="sel" />)}
       {!running && <Terminals />}
       <Cables />
       <CableEnds />

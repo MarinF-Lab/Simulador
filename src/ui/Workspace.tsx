@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, type ReactNode } from "react";
-import { ArrowLeftRight, Box, Check, ChevronDown, ChevronUp, Hand, Info, Link2, Magnet, Maximize, Minus, Move, PenTool, Plus, Power, RotateCcw, RotateCw, Spline, Trash2, Undo2, X } from "lucide-react";
+import { ArrowLeftRight, Box, BoxSelect, Check, ChevronDown, ChevronUp, Hand, Info, Link2, Network, Magnet, Maximize, Minus, Move, PenTool, Plus, Power, RotateCcw, RotateCw, Spline, Trash2, Undo2, X } from "lucide-react";
 import { POLAR } from "../core/model/terminals";
 import { findItem } from "../core/model/catalog";
 import { overlay, sceneApi } from "../scene/api";
@@ -96,10 +96,17 @@ export function Workspace() {
   const drill = useProject((s) => s.drillMode);
   const nudgeZ = useProject((s) => s.nudgeZ);
   const { magnet, setMagnet } = useUI();
+  const multiMode = useProject((s) => s.multiMode);
+  const multi = useProject((s) => s.multi);
+  const { setMultiMode, addLinked, removeGroup } = useProject();
 
   const jointFirst = useProject((s) => s.jointFirst);
   const jointMsg = useProject((s) => s.jointMsg);
-  const hint = draw
+  const hint = multiMode && !running
+    ? multi.length < 2
+      ? "Varias: toca las piezas que quieres mover juntas. Con Todo lo unido se agrega lo que está unido a ellas."
+      : "Arrastra cualquiera de las piezas marcadas para mover el grupo entero. Toca una pieza para agregarla o quitarla."
+    : draw
     ? draw.msg ?? (draw.pts.length === 0
       ? "Toca la mesa para poner el primer vértice de la pieza. Puedes mover la vista arrastrando."
       : draw.pts.length < 3
@@ -156,8 +163,8 @@ export function Workspace() {
       </Suspense>
 
       <div ref={(el) => { overlay.partTools = el; }} hidden className="absolute top-0 left-0 z-10 flex flex-wrap gap-2">
-        {/* Con una herramienta activa (Taladro, Pegamento, juntas) los botones no deben tapar la pieza. */}
-        {!(drill || glue || jointTool) && (
+        {/* Con una herramienta activa (Taladro, Pegamento, juntas, Varias) los botones no deben tapar la pieza. */}
+        {!(drill || glue || jointTool || multiMode) && (
           <>
         {!running && type === "custom" && (
           <div role="radiogroup" aria-label="Al arrastrar la pieza" className="flex rounded-full border border-line bg-panel p-1 shadow-lg">
@@ -289,6 +296,17 @@ export function Workspace() {
         <button className={viewBtn} onClick={() => sceneApi.isoView()} aria-label="Vista isométrica" title="Vista isométrica"><Box className="size-5" /></button>
         {!running && (
           <button
+            className={viewBtn + (multiMode ? " border-accent bg-accent text-accent-ink" : "")}
+            onClick={() => setMultiMode(!multiMode)}
+            aria-pressed={multiMode}
+            aria-label={multiMode ? "Terminar de seleccionar varias piezas" : "Seleccionar varias piezas"}
+            title="Seleccionar varias"
+          >
+            <BoxSelect className="size-5" />
+          </button>
+        )}
+        {!running && (
+          <button
             className={viewBtn + (magnet ? " border-accent bg-accent text-accent-ink" : "")}
             onClick={() => setMagnet(!magnet)}
             aria-pressed={magnet}
@@ -299,6 +317,27 @@ export function Workspace() {
           </button>
         )}
       </div>
+
+      {multiMode && !running && (
+        <div role="toolbar" aria-label="Grupo de piezas" className="absolute inset-x-0 bottom-[calc(150px+env(safe-area-inset-bottom,0px))] z-10 flex flex-wrap items-center justify-center gap-2 px-3 lg:bottom-20">
+          <span className="rounded-full border border-line bg-panel px-3 py-2 text-xs font-semibold shadow-lg">{multi.length === 1 ? "1 pieza" : `${multi.length} piezas`}</span>
+          <button onClick={addLinked} disabled={!multi.length} className="flex min-h-11 items-center gap-1.5 rounded-full border border-line bg-panel px-4 text-sm font-semibold shadow-lg disabled:opacity-40">
+            <Network className="size-4" aria-hidden="true" /> Todo lo unido
+          </button>
+          {multi.length > 0 && (
+            <>
+              <HoldButton label={magnet ? "Subir el grupo 10 mm" : "Subir el grupo 1 mm"} onStep={() => nudgeZ(multi[0]!, 1)}><ChevronUp className="size-5" /></HoldButton>
+              <HoldButton label={magnet ? "Bajar el grupo 10 mm" : "Bajar el grupo 1 mm"} onStep={() => nudgeZ(multi[0]!, -1)}><ChevronDown className="size-5" /></HoldButton>
+              <button onClick={removeGroup} aria-label="Eliminar las piezas del grupo" className="grid size-11 place-items-center rounded-full bg-err text-white shadow-lg">
+                <Trash2 className="size-5" />
+              </button>
+            </>
+          )}
+          <button onClick={() => setMultiMode(false)} className="flex min-h-11 items-center gap-1.5 rounded-full bg-accent px-4 text-sm font-semibold text-accent-ink shadow-lg">
+            <Check className="size-4" aria-hidden="true" /> Listo
+          </button>
+        </div>
+      )}
 
       {draw && (
         <div role="toolbar" aria-label="Dibujar pieza" className="absolute inset-x-0 bottom-[calc(150px+env(safe-area-inset-bottom,0px))] z-10 flex flex-wrap justify-center gap-2 px-3 lg:bottom-20">

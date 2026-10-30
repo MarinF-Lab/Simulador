@@ -3,10 +3,10 @@ import { apply, cableDiff, emptyHistory, exec, record, redo, removeCableCmd, rem
 import { analyze, type Circuit } from "../core/electrical/analyze";
 import { clampZ, extent, findFree, newPart, placeOnTable, RESIZABLE, rotateLocal, unrotateLocal, type Axis, type Cable, type CableEnd, type Part, type Project, type PropValue, type Vec3 } from "../core/model/project";
 import { detachFrom, endPos, posKey, reattach, termWorld } from "../core/model/terminals";
-import { snapRotor } from "../core/mechanical/snap";
-import { blockers, restOn, slide, sweep } from "../core/model/footprint";
+import { snapRotor, snapToShaft } from "../core/mechanical/snap";
+import { blockers, dropGroup, restOn, slide, slideGroup, sweep, sweepGroup } from "../core/model/footprint";
 import { useUI } from "./ui";
-import { isRotor } from "../core/mechanical/axes";
+import { coaxial, isRotor, motorAxis, rotorAxis } from "../core/mechanical/axes";
 import { solveTrain, type Train } from "../core/mechanical/train";
 import { alignedPairs, alignTo, holeAt, holesOf, nearestHole, snapHoles, type HoleRef } from "../core/model/holes";
 import { GRID_MM } from "../core/model/units";
@@ -115,6 +115,15 @@ interface ProjectState {
   beltTap: (id: number) => void;
   toggleCross: (id: number) => void;
   select: (id: number | null) => void;
+  /** Modo Varias: tocar agrega o quita piezas del grupo; arrastrar una mueve todo el grupo. */
+  multiMode: boolean;
+  multi: number[];
+  setMultiMode: (on: boolean) => void;
+  toggleMulti: (id: number) => void;
+  /** Agrega al grupo lo unido a él (juntas, pegamento y lo que gira en el mismo eje). */
+  addLinked: () => void;
+  /** Borra todas las piezas del grupo (se deshace en un paso). */
+  removeGroup: () => void;
   setRotAxis: (a: Axis) => void;
   run: (c: Command | null) => void;
   addNear: (type: string, x: number, y: number) => number;
@@ -213,6 +222,16 @@ export const useProject = create<ProjectState>((set, get) => {
   };
   const part = (id: number) => get().project.parts.find((p) => p.id === id);
   const stepNow = () => (useUI.getState().magnet ? GRID_MM : 1);
+  /** Si mover la pieza a `at` deja sus juntas y pegamentos funcionando. */
+  const keepsJoints = (project: Project, id: number, at: { x: number; y: number; z: number }) => {
+    const mine = (project.joints ?? []).filter((j) => j.a.part === id || j.b.part === id);
+    if (!mine.length) return true;
+    const moved = { ...project, parts: project.parts.map((q) => (q.id === id ? { ...q, ...at } : q)) };
+    const before = checkStructure(project).broken, after = checkStructure(moved).broken;
+    return mine.every((j) => before.has(j.id) || !after.has(j.id));
+  };
+  /** Posición de cada pieza del grupo al empezar a arrastrarlo (null si se arrastra una sola). */
+  let groupFrom: Map<number, Pick<Part, "x" | "y" | "z" | "rot">> | null = null;
   /** Al soltar sin imán, la pieza cae hasta apoyarse en lo que tenga debajo (o la mesa). */
   const drop = (id: number) => {
     const s = get();
@@ -220,6 +239,9 @@ export const useProject = create<ProjectState>((set, get) => {
     if (!p || useUI.getState().magnet || isRotor(p.type) || p.type === "text") return;
     // Las piezas unidas con juntas o pegamento se quedan donde están (las sostiene la unión).
     if ((s.project.joints ?? []).some((j) => j.a.part === id || j.b.part === id)) return;
+    // Centrada en un eje: el eje la sostiene.
+    const sh = snapToShaft(s.project, p, p.x, p.y, 0.3);
+    if (sh && Math.abs(sh.x - p.x) < 0.3 && Math.abs(sh.y - p.y) < 0.3 && Math.abs(sh.z - p.z) < 0.3) return;
     const z = restOn(s.project, p, p.x, p.y, p.z);
     if (z < p.z - 0.05) set({ project: { ...s.project, parts: s.project.parts.map((q) => (q.id === id ? { ...q, z } : q)) } });
   };
@@ -260,7 +282,7 @@ export const useProject = create<ProjectState>((set, get) => {
     },
     dismissJoint: () => set({ jointOffer: null }),
     load: (project) =>
-      set({ project, history: emptyHistory(), selected: null, dragging: null, dragFrom: null, pending: null, jointOffer: null, jointTool: null, beltMode: null, pressed: {}, held: {}, drawMode: null, glueMode: null, selVertex: null, shapeFrom: null, jointFirst: null, jointMsg: null, drillMode: null }),
+      set({ project, history: emptyHistory(), selected: null, dragging: null, dragFrom: null, pending: null, jointOffer: null, jointTool: null, beltMode: null, pressed: {}, held: {}, drawMode: null, glueMode: null, selVertex: null, shapeFrom: null, jointFirst: null, jointMsg: null, drillMode: null, multi: [], multiMode: false }),
     jointFirst: null,
     jointMsg: null,
     jointTap: (id, at) => {
@@ -345,6 +367,49 @@ export const useProject = create<ProjectState>((set, get) => {
       const b = (get().project.belts ?? []).find((x) => x.id === id);
       if (b) commit({ kind: "updateBelt", id, before: b.cross, after: !b.cross });
     },
+    multiMode: false,
+    multi: [],
+    setMultiMode: (on) => {
+      const s = get();
+      const sel = s.selected !== null && s.project.parts.some((p) => p.id === s.selected) ? [s.selected] : [];
+      set({ multiMode: on, multi: on ? sel : [], selected: on && sel.length ? s.selected : null, beltMode: null, jointTool: null, glueMode: null, drillMode: null, drawMode: null, pending: null });
+    },
+    toggleMulti: (id) => {
+      const m = get().multi;
+      set({ multi: m.includes(id) ? m.filter((x) => x !== id) : [...m, id], selected: m.includes(id) ? null : id });
+    },
+    addLinked: () => {
+      const s = get();
+      const have = new Set(s.multi);
+      const axes = new Map(s.project.parts.map((p) => [p.id, rotorAxis(p) ?? motorAxis(p)]));
+      for (let grew = true; grew;) {
+        grew = false;
+        // Juntas y pegamento, engranajes que engranan y poleas con correa o cuerda.
+        const pairs: [number, number][] = [
+          ...(s.project.joints ?? []).map((j): [number, number] => [j.a.part, j.b.part]),
+          ...s.mech.meshes.map((m): [number, number] => [m.a, m.b]),
+          ...(s.project.belts ?? []).map((b): [number, number] => [b.a, b.b]),
+        ];
+        for (const [x, y] of pairs) {
+          const a = have.has(x), b = have.has(y);
+          if (a !== b) { have.add(a ? y : x); grew = true; }
+        }
+        for (const p of s.project.parts) {
+          if (have.has(p.id)) continue;
+          const A = axes.get(p.id);
+          if (A && [...have].some((h) => { const B = axes.get(h); return !!B && coaxial(A, B); })) { have.add(p.id); grew = true; }
+        }
+      }
+      set({ multi: s.project.parts.filter((p) => have.has(p.id)).map((p) => p.id) });
+    },
+    removeGroup: () => {
+      const ids = get().multi;
+      const n0 = get().history.past.length;
+      for (const id of ids) get().remove(id);
+      const h = get().history, added = h.past.slice(n0);
+      if (added.length > 1) set({ history: { past: [...h.past.slice(0, n0), { kind: "batch", cmds: added }], future: [] } });
+      set({ multi: [], selected: null });
+    },
     select: (selected) => set({ selected, pending: null, beltMode: null, jointTool: null, jointFirst: null, jointMsg: null, jointOffer: null, glueMode: null, drillMode: null, selVertex: null }),
     setRotAxis: (rotAxis) => set({ rotAxis }),
     run: commit,
@@ -425,6 +490,22 @@ export const useProject = create<ProjectState>((set, get) => {
       const s = get();
       const p = part(id);
       if (!p) return;
+      if (groupFrom && groupFrom.has(id)) {
+        // Grupo: se mueve rígido según la pieza tocada, sin atravesar lo de afuera.
+        const f = groupFrom.get(id)!, step = stepNow();
+        const want = { x: Math.round((x - f.x) / step) * step - (p.x - f.x), y: Math.round((y - f.y) / step) * step - (p.y - f.y), z: 0 };
+        const members = s.project.parts.filter((q) => groupFrom!.has(q.id));
+        // Sin salir de la mesa.
+        for (const q of members) {
+          const at = placeOnTable(q, q.x + want.x, q.y + want.y, 0.1);
+          want.x += at.x - (q.x + want.x);
+          want.y += at.y - (q.y + want.y);
+        }
+        const d = slideGroup(s.project, members, want);
+        if (!d.x && !d.y) return;
+        set({ project: { ...s.project, parts: s.project.parts.map((q) => (groupFrom!.has(q.id) ? { ...q, x: Math.round((q.x + d.x) * 10) / 10, y: Math.round((q.y + d.y) * 10) / 10 } : q)) } });
+        return;
+      }
       const magnet = useUI.getState().magnet;
       const o = s.dragFrom ?? p;
       const base = { ...p, rot: o.rot };
@@ -445,7 +526,17 @@ export const useProject = create<ProjectState>((set, get) => {
           }
           return;
         }
-      } else if (magnet) {
+      }
+      // Un agujero de la pieza (o el eje de un motor) cerca de un eje suelto: se centra en él.
+      let onShaft = !isRotor(p.type) ? snapToShaft(s.project, base, x, y, magnet ? 16 : 4) : null;
+      // Sin romper sus uniones: si centrarla en altura despega su pegamento, solo se centra en planta
+      // (los agujeros tienen juego: medio milímetro no impide que el eje pase).
+      if (onShaft && keepsJoints(s.project, id, onShaft) === false) {
+        const flat = { ...onShaft, z: p.z };
+        onShaft = keepsJoints(s.project, id, flat) ? flat : null;
+      }
+      if (onShaft && free(onShaft)) next = onShaft;
+      else if (!isRotor(p.type) && magnet) {
         // Con imán: agujeros primero; si no, la pieza se apoya sobre lo que tenga debajo.
         const h = snapHoles(s.project, base, x, y);
         if (h && free(h)) next = h;
@@ -467,9 +558,36 @@ export const useProject = create<ProjectState>((set, get) => {
     },
     beginDrag: (id) => {
       const p = part(id);
+      const s = get();
+      groupFrom = s.multiMode && s.multi.includes(id) && s.multi.length > 1
+        ? new Map(s.project.parts.filter((q) => s.multi.includes(q.id)).map((q) => [q.id, { x: q.x, y: q.y, z: q.z, rot: q.rot }]))
+        : null;
       set({ dragging: id, selected: id, pending: null, dragFrom: p ? { x: p.x, y: p.y, z: p.z, rot: p.rot } : null });
     },
     endDrag: (id, fromXY) => {
+      if (groupFrom) {
+        const from = groupFrom;
+        groupFrom = null;
+        set({ dragging: null, dragFrom: null });
+        let s = get();
+        // Sin imán, el grupo baja junto hasta apoyarse (si nada de afuera lo sostiene con juntas).
+        const members = s.project.parts.filter((q) => from.has(q.id));
+        const heldOut = (s.project.joints ?? []).some((j) => from.has(j.a.part) !== from.has(j.b.part));
+        if (!useUI.getState().magnet && !heldOut) {
+          const dz = dropGroup(s.project, members);
+          if (dz > 0.05) set({ project: { ...s.project, parts: s.project.parts.map((q) => (from.has(q.id) ? { ...q, z: Math.round((q.z - dz) * 10) / 10 } : q)) } });
+        }
+        s = get();
+        const moves: Command[] = s.project.parts.filter((q) => from.has(q.id)).flatMap((q) => {
+          const f = from.get(q.id)!;
+          return q.x === f.x && q.y === f.y && q.z === f.z ? [] : [{ kind: "update", id: q.id, before: { x: f.x, y: f.y, z: f.z }, after: { x: q.x, y: q.y, z: q.z } } as Command];
+        });
+        if (!moves.length) return;
+        const cables = reattach(s.project);
+        const extra = cableDiff(s.project.cables, cables);
+        set({ project: { ...s.project, cables }, history: record(s.history, { kind: "batch", cmds: [...moves, ...extra] }) });
+        return;
+      }
       let s = get();
       let p = part(id);
       const from = s.dragFrom ?? { ...fromXY, z: p?.z ?? 0, rot: p?.rot ?? [0, 0, 0] };
@@ -513,6 +631,16 @@ export const useProject = create<ProjectState>((set, get) => {
       const p = part(id);
       if (!p) return;
       const step = useUI.getState().magnet ? GRID_MM : 1;
+      const s0 = get();
+      if (s0.multiMode && s0.multi.length > 1 && s0.multi.includes(id)) {
+        const members = s0.project.parts.filter((q) => s0.multi.includes(q.id));
+        const low = Math.min(...members.map((q) => q.z));
+        const want = Math.max(-low, dir * step);
+        const d = sweepGroup(s0.project, members, { x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: want });
+        if (Math.abs(d.z) < 0.05) return;
+        commit({ kind: "batch", cmds: members.map((q) => updateCmd(s0.project, q.id, { z: clampZ(q.z + d.z) })).filter((c): c is Command => c !== null) });
+        return;
+      }
       const to = sweep(get().project, p, p, { x: p.x, y: p.y, z: clampZ(p.z + dir * step) });
       if (to.z !== p.z) commit(updateCmd(get().project, id, { z: clampZ(to.z) }, `${id}:z`));
     },
@@ -590,6 +718,7 @@ export const useProject = create<ProjectState>((set, get) => {
         commit(all.length > 1 ? { kind: "batch", cmds: all } : rm);
       }
       if (get().selected === id) set({ selected: null });
+      if (get().multi.includes(id)) set({ multi: get().multi.filter((x) => x !== id) });
       set({ pending: null });
     },
 

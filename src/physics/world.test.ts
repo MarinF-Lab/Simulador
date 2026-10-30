@@ -501,3 +501,38 @@ describe("garras del usuario", () => {
     sim.free();
   });
 });
+
+describe("eje por el agujero de una pared, movido por un motor", () => {
+  it("el brazo pegado al eje gira con el motor y la pared hace de soporte", async () => {
+    const { snapRotor, snapToShaft } = await import("../core/mechanical/snap");
+    const { solveTrain } = await import("../core/mechanical/train");
+    const { holesOf: holes } = await import("../core/model/holes");
+    const plate = P(1, "plate", 0, 0, 0, [0, 0, 0], { lx: 300, ly: 200 });
+    // Pared vertical en el plano YZ con un agujero a 40 mm de altura.
+    const wall: Part = { id: 2, type: "custom", x: 40, y: 0, z: 6, rot: [0, 1, 0], props: { shape: "-30,-30;30,-30;30,30;-30,30", h: 6, holes: "Sin agujeros", drill: "0,0" } };
+    const base: Project = { parts: [plate, wall], cables: [], nextId: 20 };
+    const h = holes(wall)[0]!;
+    const shaft0: Part = { id: 3, type: "shaft", x: 0, y: 0, z: 0, rot: [0, 0, 0], props: { lx: 100 } };
+    const shaft = { ...shaft0, ...snapRotor(base, shaft0, h.p[0] + 10, h.p[1], 16)! };
+    base.parts.push(shaft);
+    const m0 = P(4, "dcmotor", shaft.x - 100, 0, 6, [0, 0, 0], { rpm: 60, vnom: 6, torque: 0.8 });
+    const motor = { ...m0, ...snapToShaft(base, m0, m0.x, m0.y, 16)! };
+    base.parts.push(motor);
+    // Brazo de madera pegado al eje, del lado de afuera de la pared, colgando hacia arriba.
+    const ax = shaft.x + 40;
+    const arm: Part = { id: 5, type: "custom", x: ax, y: 0, z: h.p[2] - 4, rot: [0, 1, 0], props: { shape: "-15,-5;15,-5;15,5;-15,5", h: 6, holes: "Sin agujeros" } };
+    base.parts.push(arm);
+    const project: Project = { ...base, joints: [{ id: 9, kind: "glue", a: { part: 5, h: -1 }, b: { part: 3, h: -1 } }] };
+    const t = solveTrain(project, { 4: 60 });
+    expect(t.source[3]).toBe(4);
+    const sim = new Sim(project);
+    const env = { voltage: (id: number) => (id === 4 ? 6 : 0), props: (id: number) => project.parts.find((p) => p.id === id)?.props ?? {}, rpm: (id: number) => t.rpm[id] ?? 0, source: (id: number) => t.source[id], ratio: (id: number) => t.ratio[id] ?? 0, stages: (id: number) => t.stages[id] ?? 0 };
+    const z0 = sim.poses().get(5)!.p[2];
+    for (let i = 0; i < 20; i++) sim.step(1 / 60, env);
+    expect(Math.abs(sim.spins().get(3)!)).toBeGreaterThan(1);
+    // El brazo giró con el eje (su centro cambió de altura) y la pared quedó en su lugar.
+    expect(Math.abs(sim.poses().get(5)!.p[2] - z0)).toBeGreaterThan(5);
+    expect(sim.status(env, 0.3).issues.map((i) => i.h)).not.toContain("Motor detenido por un choque");
+    sim.free();
+  });
+});

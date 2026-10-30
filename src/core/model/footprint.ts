@@ -254,3 +254,68 @@ export function restOn(project: Pick<Project, "parts">, part: Part, x: number, y
   }
   return r1(top);
 }
+
+/**
+ * Grupo de piezas que se mueven juntas, rígidas: lleva el desplazamiento de `d0` a `d1` (desde
+ * donde están ahora) y se detiene al tocar una pieza de afuera. Las del grupo no chocan entre sí.
+ */
+export function sweepGroup(project: Pick<Project, "parts">, group: Part[], d0: Pos, d1: Pos): Pos {
+  const dx = d1.x - d0.x, dy = d1.y - d0.y, dz = d1.z - d0.z, dist = Math.hypot(dx, dy, dz);
+  if (dist < 1e-6) return d1;
+  const ids = new Set(group.map((p) => p.id));
+  const mem = group.map((p) => ({ p, h: hullsOf(p, { x: p.x + d0.x, y: p.y + d0.y, z: p.z + d0.z }) })).filter((m) => m.h.length);
+  if (!mem.length) return d1;
+  const [blo, bhi] = bbox(mem.flatMap((m) => m.h));
+  const d = [dx, dy, dz];
+  const outside = project.parts.filter((o) => !ids.has(o.id)).map((o) => ({ o, h: hullsOf(o) })).filter(({ h }) => {
+    if (!h.length) return false;
+    const [olo, ohi] = bbox(h);
+    for (let k = 0; k < 3; k++) {
+      if (olo[k]! > Math.max(bhi[k]!, bhi[k]! + d[k]!) + 1 || ohi[k]! < Math.min(blo[k]!, blo[k]! + d[k]!) - 1) return false;
+    }
+    return true;
+  });
+  // Pares que cuentan: los que pueden chocar y no se atravesaban ya al empezar.
+  const pairs: [number, Hull[]][] = [];
+  mem.forEach((m, i) => { for (const { o, h } of outside) if (!passes(m.p, o) && gapOf(m.h, h) >= -TOL) pairs.push([i, h]); });
+  if (!pairs.length) return d1;
+  const shift = (hs: Hull[], t: number): Hull[] => hs.map((h) => {
+    const o: Vec3 = [dx * t, dy * t, dz * t];
+    return { v: h.v.map((q) => [q[0] + o[0], q[1] + o[1], q[2] + o[2]] as Vec3), axes: h.axes, edges: h.edges, lo: [h.lo[0] + o[0], h.lo[1] + o[1], h.lo[2] + o[2]], hi: [h.hi[0] + o[0], h.hi[1] + o[1], h.hi[2] + o[2]] };
+  });
+  const free = (t: number) => { const moved = mem.map((m) => shift(m.h, t)); return pairs.every(([i, h]) => gapOf(moved[i]!, h) >= -0.05); };
+  const n = Math.ceil(dist / 2.5);
+  let ok = 0;
+  for (let i = 1; i <= n; i++) {
+    const t = i / n;
+    if (free(t)) { ok = t; continue; }
+    let lo = ok, hi = t;
+    for (let k = 0; k < 12; k++) { const m = (lo + hi) / 2; if (free(m)) lo = m; else hi = m; }
+    return { x: r1(d0.x + dx * lo), y: r1(d0.y + dy * lo), z: r1(d0.z + dz * lo) };
+  }
+  return d1;
+}
+
+/** Como `sweepGroup`, pero si choca sigue deslizando el grupo a lo largo de la otra pieza. */
+export function slideGroup(project: Pick<Project, "parts">, group: Part[], d1: Pos): Pos {
+  const zero = { x: 0, y: 0, z: 0 };
+  const a = sweepGroup(project, group, zero, d1);
+  if (a.x === d1.x && a.y === d1.y && a.z === d1.z) return a;
+  const tryOrder = (first: "x" | "y"): Pos => {
+    const second = first === "x" ? "y" : "x";
+    const b = sweepGroup(project, group, a, { ...a, [first]: d1[first] });
+    return sweepGroup(project, group, b, { ...b, [second]: d1[second] });
+  };
+  const bx = tryOrder("x"), by = tryOrder("y");
+  const dd = (p: Pos) => Math.hypot(p.x - d1.x, p.y - d1.y);
+  return dd(bx) <= dd(by) ? bx : by;
+}
+
+/** Cuánto puede bajar el grupo hasta que una de sus piezas se apoye en algo de afuera (o en la mesa). */
+export function dropGroup(project: Pick<Project, "parts">, group: Part[]): number {
+  const ids = new Set(group.map((p) => p.id));
+  const others = { parts: project.parts.filter((o) => !ids.has(o.id)) };
+  let drop = Infinity;
+  for (const p of group) drop = Math.min(drop, p.z - restOn(others, p, p.x, p.y, p.z));
+  return Number.isFinite(drop) ? Math.max(0, r1(drop)) : 0;
+}

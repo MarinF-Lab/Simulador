@@ -218,8 +218,11 @@ export class Sim {
   private assembly = new Map<number, number>();
   private trains = new Map<number, TrainState>();
   private groups = new Map<number, Sim["rotors"]>();
-  /** Pares que no cuentan como choque: se tocaban al empezar o están unidos por una junta. */
+  /** Pares que no cuentan como choque: los unidos por una junta. */
   private linked = new Set<string>();
+  /** Pares que ya se atravesaban al empezar: no cuentan hasta que se separan. */
+  private startOver = new Set<string>();
+  private steps = 0;
   private typeOf = new Map<number, string>();
   /** Cadena de cada servo (todo lo que mueve) y su ángulo del paso anterior. */
   private servoChain = new Map<number, Set<number>>();
@@ -363,12 +366,13 @@ export class Sim {
       const r = this.rotors.find((x) => x.id === rid), b = this.bodies.get(id), c = this.start.get(id);
       if (r && b && c) r.attached.push({ id, body: b, off: [c[0] - r.c0[0], c[1] - r.c0[1], c[2] - r.c0[2]] });
     }
-    // Pares que no detienen a un motor: los que ya se tocaban al empezar o están unidos.
+    // Pares que no detienen a un motor: los unidos por una junta, y los que ya se atravesaban al
+    // empezar (hasta que se separan). Los que solo se tocan sí cuentan: al cerrarse, chocan.
     const key = (a: number, b: number) => (a < b ? `${a}:${b}` : `${b}:${a}`);
     const movers = project.parts.filter((p) => ROTORS[p.type] || kin.has(p.id) || this.assembly.has(p.id));
     const hull = new Map(project.parts.map((p) => [p.id, hullsOf(p)]));
     for (const m of movers) for (const o of project.parts) {
-      if (o.id !== m.id && gapOf(hull.get(m.id)!, hull.get(o.id)!) < 0.5) this.linked.add(key(m.id, o.id));
+      if (o.id !== m.id && gapOf(hull.get(m.id)!, hull.get(o.id)!) < -0.3) this.startOver.add(key(m.id, o.id));
     }
     for (const j of project.joints ?? []) this.linked.add(key(j.a.part, j.b.part));
 
@@ -584,7 +588,8 @@ export class Sim {
 
   /** Pieza dueña de un colisionador y si el par cuenta como choque. */
   private counts(a: number, b: number): boolean {
-    if (a === b || this.linked.has(a < b ? `${a}:${b}` : `${b}:${a}`)) return false;
+    const k = a < b ? `${a}:${b}` : `${b}:${a}`;
+    if (a === b || this.linked.has(k) || this.startOver.has(k)) return false;
     const ra = !!ROTORS[this.typeOf.get(a) ?? ""], rb = !!ROTORS[this.typeOf.get(b) ?? ""];
     // Entre engranajes y ejes manda el tren de transmisión.
     if (ra && rb) return false;
@@ -598,6 +603,20 @@ export class Sim {
    */
   private loads(env: SimEnv): void {
     const g = 9.81;
+    // Cada tanto: los pares que se atravesaban al empezar y ya se separaron vuelven a chocar.
+    if (++this.steps % 12 === 0) {
+      for (const k of this.startOver) {
+        const [a, b] = k.split(":").map(Number);
+        const A = this.bodies.get(a!), B = this.bodies.get(b!);
+        if (!A || !B) continue;
+        let near = Infinity;
+        for (let i = 0; i < A.numColliders(); i++) for (let j = 0; j < B.numColliders(); j++) {
+          const c = A.collider(i).contactCollider(B.collider(j), 0.5 * S);
+          if (c) near = Math.min(near, c.distance);
+        }
+        if (near > 0) this.startOver.delete(k);
+      }
+    }
     for (const [m, rs] of this.groups) {
       const st = this.trains.get(m)!;
       let need = 0, hit = false;

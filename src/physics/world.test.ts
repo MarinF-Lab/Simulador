@@ -463,3 +463,41 @@ describe("el motor se detiene si no puede mover la carga", () => {
     expect(geared.angle).toBeGreaterThan(1.2 * Math.PI);
   });
 });
+
+describe("garras del usuario", () => {
+  it("dos garras que empiezan tocándose se detienen al cerrarse, sin atravesarse", async () => {
+    const { solveTrain } = await import("../core/mechanical/train");
+    const parts: Part[] = [
+      P(13, "plate", 196, -47, 0, [0, 0, 0], { lx: 200, ly: 160, lz: 4 }),
+      P(14, "dcmotor", 180, -40, 4, [0, 3, 0], { rpm: 30, torque: 0.8, vnom: 9 }),
+      P(15, "gear10", 179.7, -40.3, 54),
+      P(61, "gear20", 200.4, -18.8, 57),
+      P(62, "gear20", 240.4, -18.9, 57),
+      P(65, "custom", 240, -51, 65, [0, 0, 0], { shape: "-10,45;20,25;20,-25;-10,-45;-20,-45;-20,-15;-10,-15;0,-5;0,5;-10,15", h: 6, color: "Madera", holes: "Cada 10 mm" }),
+      P(66, "custom", 200, -51, 65, [0, 2, 0], { shape: "-20,-45;-10,-45;20,-25;20,25;-10,45;-10,15;0,5;0,-5;-10,-15;-20,-15", h: 6, color: "Madera", holes: "Cada 10 mm" }),
+    ];
+    const project: Project = { parts, cables: [], nextId: 90, joints: [
+      { id: 69, kind: "fixed", a: { part: 62, h: 8 }, b: { part: 65, h: 11 } },
+      { id: 70, kind: "fixed", a: { part: 61, h: 8 }, b: { part: 66, h: 10 } },
+    ] };
+    const t = solveTrain(project, { 14: -30 });
+    const pos = () => { const p = sim.poses().get(65)!.p; return [p[0], p[1]]; };
+    const env = (v: number) => ({
+      voltage: (id: number) => (id === 14 ? v : 0), props: (id: number) => parts.find((p) => p.id === id)?.props ?? {},
+      rpm: (id: number) => t.rpm[id] ?? 0, source: (id: number) => t.source[id], ratio: (id: number) => t.ratio[id] ?? 0, stages: (id: number) => t.stages[id] ?? 0,
+    });
+    // Cerrando: ya se tocan, así que no avanzan.
+    let sim = new Sim(project);
+    const p0 = pos();
+    for (let i = 0; i < 120; i++) sim.step(1 / 60, env(-3.7));
+    expect(Math.hypot(pos()[0]! - p0[0]!, pos()[1]! - p0[1]!)).toBeLessThan(1);
+    expect(sim.status(env(-3.7), 0.3).issues.map((i) => i.h)).toContain("Motor detenido por un choque");
+    sim.free();
+    // Abriendo: dan media vuelta y chocan por el otro lado (no dan la vuelta completa).
+    sim = new Sim(project);
+    for (let i = 0; i < 900; i++) sim.step(1 / 60, env(3.7));
+    expect(Math.abs(sim.spins().get(62)!)).toBeLessThan(Math.PI * 1.2);
+    expect(Math.abs(sim.spins().get(62)!)).toBeGreaterThan(Math.PI * 0.7);
+    sim.free();
+  });
+});

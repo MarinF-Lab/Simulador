@@ -303,3 +303,50 @@ describe("Mando de mantener apretado", async () => {
     expect(out()).toBeCloseTo(before, 5);
   });
 });
+
+describe("varias piezas como grupo", async () => {
+  const { useUI } = await import("./ui");
+  const { checkStructure } = await import("../core/model/structure");
+  const sq = (id: number, x: number, y: number, z = 0) => ({ id, type: "custom", x, y, z, rot: [0, 0, 0] as [number, number, number], props: { shape: "-20,-20;20,-20;20,20;-20,20", h: 6, holes: "Sin agujeros" } });
+
+  it("arrastrar una pieza del grupo mueve todas, choca con las de afuera y se deshace en un paso", () => {
+    useUI.getState().setMagnet(false);
+    const st = useProject.getState();
+    st.load({ parts: [sq(1, 0, 0), sq(2, 0, 40), sq(3, 150, 0)], cables: [], belts: [], joints: [{ id: 9, kind: "glue", a: { part: 1, h: -1 }, b: { part: 2, h: -1 } }], nextId: 10 });
+    useProject.getState().setMultiMode(true);
+    useProject.getState().toggleMulti(1);
+    useProject.getState().addLinked();
+    expect(useProject.getState().multi).toEqual([1, 2]);
+    useProject.getState().beginDrag(1);
+    useProject.getState().moveLive(1, 30, 5);
+    let ps = useProject.getState().project.parts;
+    expect(ps[0]).toMatchObject({ x: 30, y: 5 });
+    expect(ps[1]).toMatchObject({ x: 30, y: 45 });
+    // Hacia la pieza 3 (en x = 150): el grupo se detiene pegado a ella.
+    useProject.getState().moveLive(1, 200, 5);
+    ps = useProject.getState().project.parts;
+    expect(ps[0]!.x).toBeGreaterThan(109);
+    expect(ps[0]!.x).toBeLessThanOrEqual(110.1);
+    expect(ps[1]!.x).toBe(ps[0]!.x);
+    useProject.getState().endDrag(1, { x: 0, y: 0 });
+    expect(checkStructure(useProject.getState().project).broken.size).toBe(0);
+    useProject.getState().undo();
+    ps = useProject.getState().project.parts;
+    expect(ps[0]).toMatchObject({ x: 0, y: 0 });
+    expect(ps[1]).toMatchObject({ x: 0, y: 40 });
+  });
+
+  it("subir, bajar y borrar el grupo", () => {
+    const st = useProject.getState();
+    st.load({ parts: [sq(1, 0, 0), sq(2, 100, 0), sq(3, 300, 0)], cables: [], belts: [], joints: [], nextId: 10 });
+    useProject.getState().setMultiMode(true);
+    useProject.getState().toggleMulti(1);
+    useProject.getState().toggleMulti(2);
+    for (let i = 0; i < 5; i++) useProject.getState().nudgeZ(1, 1);
+    expect(useProject.getState().project.parts.slice(0, 2).map((p) => p.z)).toEqual([5, 5]);
+    useProject.getState().removeGroup();
+    expect(useProject.getState().project.parts.map((p) => p.id)).toEqual([3]);
+    useProject.getState().undo();
+    expect(useProject.getState().project.parts.map((p) => p.id).sort()).toEqual([1, 2, 3]);
+  });
+});

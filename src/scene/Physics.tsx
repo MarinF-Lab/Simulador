@@ -21,6 +21,7 @@ export function PhysicsRunner() {
   useEffect(() => {
     let alive = true;
     useSim.setState({ loading: true, error: null });
+    useProject.setState({ multiMode: false, multi: [] });
     // Cada simulación nueva empieza una grabación nueva.
     useRecord.getState().clear();
     lastAngle.current.clear();

@@ -5,6 +5,7 @@
 
 import { extent, rotateLocal, sizeOf, type Part, type Project, type Vec3 } from "./project";
 import { customHoles } from "./polygon";
+import { restOn } from "./footprint";
 
 export interface HoleRef {
   part: number;
@@ -51,7 +52,7 @@ const cache = new Map<string, LocalHole[]>();
 
 function localHoles(part: Pick<Part, "type" | "props">): LocalHole[] {
   const [lx, ly, h] = sizeOf(part.type, part.props);
-  const key = part.type === "custom" ? `custom:${String(part.props.shape)}:${String(part.props.holes)}:${String(part.props.drill ?? "")}:${h}` : `${part.type}:${lx}:${ly}`;
+  const key = part.type === "custom" ? `custom:${String(part.props.shape)}:${String(part.props.holes)}:${String(part.props.drill ?? "")}:${h}` : `${part.type}:${lx}:${ly}:${h}`;
   const hit = cache.get(key);
   if (hit) return hit;
   let out: LocalHole[] = [];
@@ -210,15 +211,7 @@ export function snapHoles(project: Pick<Project, "parts">, moving: Part, x: numb
   return best && { x: best.x, y: best.y, z: best.z };
 }
 
-/** Altura de apoyo: la cara de arriba más alta de lo que hay bajo la pieza (o la mesa). */
+/** Altura de apoyo: la cara de arriba más alta de lo que de verdad queda bajo la pieza (o la mesa). */
 export function restHeight(project: Pick<Project, "parts">, moving: Part, x: number, y: number): number {
-  const [ex, ey] = extent(moving);
-  let top = 0;
-  for (const o of project.parts) {
-    if (o.id === moving.id) continue;
-    const [ox, oy, oz] = extent(o);
-    const overlap = Math.abs(o.x - x) < (ex + ox) / 2 - 0.5 && Math.abs(o.y - y) < (ey + oy) / 2 - 0.5;
-    if (overlap) top = Math.max(top, o.z + oz);
-  }
-  return Math.round(top * 10) / 10;
+  return restOn(project, moving, x, y);
 }

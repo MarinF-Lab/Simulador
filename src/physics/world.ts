@@ -9,10 +9,11 @@ import RAPIER from "@dimforge/rapier3d-compat";
 import { holeAt } from "../core/model/holes";
 import type { Joint } from "../core/model/project";
 import { extent, rotateLocal, sizeOf, type Part, type Project, type Vec3 } from "../core/model/project";
-import { ROTORS, ropeDrop, rotorAxis } from "../core/mechanical/axes";
+import { isMotor, ROTORS, ropeDrop, rotorAxis } from "../core/mechanical/axes";
+import { gapOf, hullsOf } from "../core/model/footprint";
 import { parseShape, triangulate } from "../core/model/polygon";
 import { checkStructure, jointPoint } from "../core/model/structure";
-import { motorCurrent, motorParams, motorTorque, noLoadSpeed, type MotorParams } from "../core/coupling/dcmotor";
+import { motorCurrent, motorParams, motorTorque, noLoadSpeed, toRpm, type MotorParams } from "../core/coupling/dcmotor";
 import type { Issue } from "../core/electrical/circuit";
 import { atLimit, servoRamp } from "../core/coupling/control";
 
@@ -102,6 +103,8 @@ export interface SimStatus {
   jointAngle: Record<number, number>;
   /** Sensores de contacto que alguna pieza está tocando. */
   pressed: Record<number, boolean>;
+  /** RPM reales de engranajes, poleas y ejes (con carga o detenidos). */
+  spin: Record<number, number>;
   t: number;
 }
 
@@ -111,7 +114,30 @@ export interface SimEnv {
   props: (id: number) => Record<string, unknown>;
   /** RPM de cada polea según el tren (para enrollar las cuerdas). */
   rpm?: (id: number) => number;
+  /** Motor que mueve cada engranaje, polea o eje (del tren de transmisión). */
+  source?: (id: number) => number | undefined;
+  /** RPM de la pieza ÷ RPM de su motor. */
+  ratio?: (id: number) => number;
+  /** Engranes o correas entre el motor y la pieza (cada uno pierde un 10 %). */
+  stages?: (id: number) => number;
 }
+
+/** Estado de un motor que mueve un tren de engranajes o poleas. */
+interface TrainState {
+  /** Velocidad real del motor (rad/s) y par de la carga que siente (N·m, filtrado). */
+  w: number;
+  tau: number;
+  /** Detenido por un choque en ese sentido (+1 o −1), y tiempo para volver a intentar. */
+  blocked: number;
+  retry: number;
+  /** Segundos atascado con corriente máxima. */
+  stall: number;
+}
+
+/** Rendimiento de cada engrane o correa. */
+const GEAR_EFF = 0.9;
+/** Penetración (m) desde la que un choque detiene lo que mueve un motor. */
+const HIT = 0.001;
 
 /** Cuerda de un tambor a una carga: su largo cambia con el giro del tambor. */
 interface Rope {
@@ -187,7 +213,21 @@ export class Sim {
   private sliders = new Map<number, { body: RAPIER.RigidBody; axis: Vec3 }>();
   private ropes: Rope[] = [];
   /** Engranajes, poleas y ejes: cuerpos cinemáticos que giran según el tren de transmisión. */
-  private rotors: { id: number; body: RAPIER.RigidBody; axis: Vec3; theta: number }[] = [];
+  private rotors: { id: number; body: RAPIER.RigidBody; axis: Vec3; theta: number; prev: number; rate: number; c0: Vec3; attached: { id: number; body: RAPIER.RigidBody; off: Vec3 }[] }[] = [];
+  /** Lo pegado a un engranaje, polea o eje gira rígido con él: pieza → rotor. */
+  private assembly = new Map<number, number>();
+  private trains = new Map<number, TrainState>();
+  private groups = new Map<number, Sim["rotors"]>();
+  /** Pares que no cuentan como choque: los unidos por una junta. */
+  private linked = new Set<string>();
+  /** Pares que ya se atravesaban al empezar: no cuentan hasta que se separan. */
+  private startOver = new Set<string>();
+  private steps = 0;
+  private typeOf = new Map<number, string>();
+  /** Cadena de cada servo (todo lo que mueve) y su ángulo del paso anterior. */
+  private servoChain = new Map<number, Set<number>>();
+  private servoPrev = new Map<number, number>();
+  private servoHit = new Map<number, number>();
   /** Pares de piezas que se atraviesan al empezar (una gira dentro de la otra): no chocan. */
   private noContact = new Set<string>();
   private hooks: RAPIER.PhysicsHooks = {
@@ -258,11 +298,39 @@ export class Sim {
       }
     }
     this.kinEdges = edges;
+    this.typeOf = typeOf;
+    for (const e of edges) if (e.servo) {
+      const chain = new Set<number>([e.child]);
+      for (let grew = true; grew;) { grew = false; for (const f of edges) if (chain.has(f.parent) && !chain.has(f.child)) { chain.add(f.child); grew = true; } }
+      const cur = this.servoChain.get(e.parent) ?? new Set<number>();
+      chain.forEach((c) => cur.add(c));
+      this.servoChain.set(e.parent, cur);
+    }
+
+    // Lo pegado o unido con unión fija a un engranaje, polea o eje gira rígido con él (cinemático):
+    // así, si choca, el motor se detiene en vez de atravesar.
+    const isRot = (id: number) => !!ROTORS[typeOf.get(id) ?? ""];
+    const attachJoints = new Set<number>();
+    for (const r of project.parts.filter((p) => ROTORS[p.type])) {
+      const q = [r.id];
+      while (q.length) {
+        const id = q.shift()!;
+        for (const j of okJoints) {
+          if ((j.a.part !== id && j.b.part !== id) || (j.kind !== "fixed" && j.kind !== "glue")) continue;
+          const other = j.a.part === id ? j.b.part : j.a.part, t = typeOf.get(other) ?? "";
+          if (other === r.id || this.assembly.has(other) || kin.has(other) || isRot(other) || t === "plate" || isMotor(t) || t === "servo" || t === "linear") continue;
+          if (j.kind === "fixed" && (holeAt(project, j.a)?.shaft || holeAt(project, j.b)?.shaft)) continue;
+          this.assembly.set(other, r.id);
+          attachJoints.add(j.id);
+          q.push(other);
+        }
+      }
+    }
 
     // Placa sobre la que se apoya cada pieza (su cara de abajo en la cara de arriba de la placa).
     const plates = project.parts.filter((p) => p.type === "plate");
     const restOn = (part: Part): Part | undefined => plates.find((plate) => {
-      if (part.id === plate.id || kin.has(part.id)) return false;
+      if (part.id === plate.id || kin.has(part.id) || this.assembly.has(part.id)) return false;
       const [px, py, pz] = extent(plate), [ex, ey] = extent(part);
       return Math.abs(part.z - (plate.z + pz)) <= 0.5 && Math.abs(part.x - plate.x) <= (px + ex) / 2 - 1 && Math.abs(part.y - plate.y) <= (py + ey) / 2 - 1;
     });
@@ -276,12 +344,15 @@ export class Sim {
       // La placa base queda anclada a la mesa, salvo que se suelte para usarla como chasis. Lo que
       // se apoya en una placa anclada queda fijo como ella (más estable que unirlo con una junta).
       const fixed = anchored(part) || (!ROTORS[part.type] && anchored(restOn(part)));
-      const base = fixed ? RAPIER.RigidBodyDesc.fixed() : kin.has(part.id) || rotor ? RAPIER.RigidBodyDesc.kinematicPositionBased() : RAPIER.RigidBodyDesc.dynamic();
+      const mover = kin.has(part.id) || rotor || this.assembly.has(part.id);
+      const base = fixed ? RAPIER.RigidBodyDesc.fixed() : mover ? RAPIER.RigidBodyDesc.kinematicPositionBased() : RAPIER.RigidBodyDesc.dynamic();
       const desc = base.setTranslation(c[0] * S, c[1] * S, c[2] * S);
       const body = this.world.createRigidBody(desc);
       // Una pieza puede tener varios colisionadores (la escuadra es una L); todos llevan a la pieza.
       colliderShapes(part).forEach((shape, i) => {
-        if (rotor) shape.setActiveHooks(RAPIER.ActiveHooks.FILTER_CONTACT_PAIRS);
+        if (rotor || (mover && !fixed)) shape.setActiveHooks(RAPIER.ActiveHooks.FILTER_CONTACT_PAIRS);
+        // Lo que mueve un motor o un servo también detecta choques con lo fijo y con otras piezas movidas.
+        if (mover && !fixed) shape.setActiveCollisionTypes(RAPIER.ActiveCollisionTypes.DEFAULT | RAPIER.ActiveCollisionTypes.KINEMATIC_FIXED | RAPIER.ActiveCollisionTypes.KINEMATIC_KINEMATIC);
         const col = this.world.createCollider(shape.setDensity(density(part.type, part.props)).setFriction(part.type === "wheel" ? 1.2 : 0.7), body);
         this.partOf.set(col.handle, part.id);
         if (i === 0 && part.type === "sensorContact") this.sensors.push({ id: part.id, collider: col, ignore: new Set() });
@@ -289,8 +360,21 @@ export class Sim {
       this.bodies.set(part.id, body);
       this.start.set(part.id, c);
       const ax = rotor ? rotorAxis(part) : null;
-      if (ax) this.rotors.push({ id: part.id, body, axis: ax.a as Vec3, theta: 0 });
+      if (ax) this.rotors.push({ id: part.id, body, axis: ax.a as Vec3, theta: 0, prev: 0, rate: 0, c0: c, attached: [] });
     }
+    for (const [id, rid] of this.assembly) {
+      const r = this.rotors.find((x) => x.id === rid), b = this.bodies.get(id), c = this.start.get(id);
+      if (r && b && c) r.attached.push({ id, body: b, off: [c[0] - r.c0[0], c[1] - r.c0[1], c[2] - r.c0[2]] });
+    }
+    // Pares que no detienen a un motor: los unidos por una junta, y los que ya se atravesaban al
+    // empezar (hasta que se separan). Los que solo se tocan sí cuentan: al cerrarse, chocan.
+    const key = (a: number, b: number) => (a < b ? `${a}:${b}` : `${b}:${a}`);
+    const movers = project.parts.filter((p) => ROTORS[p.type] || kin.has(p.id) || this.assembly.has(p.id));
+    const hull = new Map(project.parts.map((p) => [p.id, hullsOf(p)]));
+    for (const m of movers) for (const o of project.parts) {
+      if (o.id !== m.id && gapOf(hull.get(m.id)!, hull.get(o.id)!) < -0.3) this.startOver.add(key(m.id, o.id));
+    }
+    for (const j of project.joints ?? []) this.linked.add(key(j.a.part, j.b.part));
 
     // Lo que gira dentro de otra pieza al empezar (un engranaje en el eje de un motor, un eje que
     // atraviesa un soporte) no choca con ella.
@@ -351,7 +435,7 @@ export class Sim {
     const broken = checkStructure(project).broken;
     const kinJoint = new Set(edges.map((e) => e.joint));
     for (const j of project.joints ?? []) {
-      if (broken.has(j.id) || kinJoint.has(j.id)) continue;
+      if (broken.has(j.id) || kinJoint.has(j.id) || attachJoints.has(j.id)) continue;
       // Lo que se une a un pistón se une a su émbolo.
       const A = this.sliders.get(j.a.part)?.body ?? this.bodies.get(j.a.part), B = this.sliders.get(j.b.part)?.body ?? this.bodies.get(j.b.part);
       // Pegamento: unión fija en el centro del contacto.
@@ -433,19 +517,188 @@ export class Sim {
       this.reel(env);
       this.spin(env);
       this.world.step(undefined, this.hooks);
+      this.loads(env);
       this.acc -= STEP;
       this.t += STEP;
       n++;
     }
   }
 
-  /** Gira engranajes, poleas y ejes al ángulo que llevan según su RPM. */
+  /**
+   * Gira engranajes, poleas y ejes (y lo pegado a ellos). Cada tren va a la velocidad real de su
+   * motor: la recta par-velocidad de un motor DC con la carga que siente, reflejada por la
+   * reducción de los engranajes. Si chocó, queda detenido en ese sentido.
+   */
   private spin(env: SimEnv): void {
+    this.groups.clear();
     for (const r of this.rotors) {
-      r.theta = (r.theta + ((env.rpm?.(r.id) ?? 0) / 60) * 2 * Math.PI * STEP) % (2 * Math.PI);
-      const h = r.theta / 2, s = Math.sin(h);
-      r.body.setNextKinematicRotation({ x: r.axis[0] * s, y: r.axis[1] * s, z: r.axis[2] * s, w: Math.cos(h) });
+      const m = env.source?.(r.id);
+      if (m === undefined) {
+        r.prev = r.theta;
+        r.rate = ((env.rpm?.(r.id) ?? 0) / 60) * 2 * Math.PI;
+        r.theta += r.rate * STEP;
+        this.place(r);
+        continue;
+      }
+      this.groups.set(m, [...(this.groups.get(m) ?? []), r]);
     }
+    for (const [m, rs] of this.groups) {
+      const st = this.trains.get(m) ?? { w: 0, tau: 0, blocked: 0, retry: 0, stall: 0 };
+      this.trains.set(m, st);
+      const type = this.typeOf.get(m), pr = env.props(m), v = env.voltage(m);
+      let w: number;
+      if (type === "dcmotor") {
+        const p = motorParams(pr);
+        const w0 = pr.burned === true ? 0 : v / p.ke;
+        // ω = (V − R·τ/Kt) / Ke. Sin voltaje, la caja de engranajes lo sostiene.
+        w = Math.abs(v) < 0.05 || w0 === 0 ? 0 : (v - (p.r * st.tau) / p.kt) / p.ke;
+        if (Math.sign(w) !== Math.sign(w0)) w = 0;
+        w = Math.max(-1.5 * Math.abs(w0), Math.min(1.5 * Math.abs(w0), w));
+      } else {
+        // Paso a paso: si la carga supera su par, pierde pasos y no avanza.
+        w = ((env.rpm?.(m) ?? 0) / 60) * 2 * Math.PI;
+        if (type === "stepper" && Math.abs(st.tau) > num(pr.torque, 0.4)) w = 0;
+      }
+      if (st.blocked) {
+        if (w !== 0 && Math.sign(w) !== st.blocked) st.blocked = 0;
+        else if ((st.retry += STEP) > 0.5) { st.blocked = 0; st.retry = 0; }
+        else w = 0;
+      }
+      st.w = w;
+      for (const r of rs) {
+        r.prev = r.theta;
+        r.rate = w * (env.ratio?.(r.id) ?? 0);
+        r.theta += r.rate * STEP;
+        this.place(r);
+      }
+    }
+  }
+
+  /** Lleva un rotor y lo pegado a él a su ángulo. */
+  private place(r: Sim["rotors"][number]): void {
+    const h = r.theta / 2, s = Math.sin(h);
+    const q: [number, number, number, number] = [r.axis[0] * s, r.axis[1] * s, r.axis[2] * s, Math.cos(h)];
+    r.body.setNextKinematicRotation({ x: q[0], y: q[1], z: q[2], w: q[3] });
+    for (const a of r.attached) {
+      const t = add3(r.c0, rot3(q, a.off));
+      a.body.setNextKinematicTranslation({ x: t[0] * S, y: t[1] * S, z: t[2] * S });
+      a.body.setNextKinematicRotation({ x: q[0], y: q[1], z: q[2], w: q[3] });
+    }
+  }
+
+  /** Pieza dueña de un colisionador y si el par cuenta como choque. */
+  private counts(a: number, b: number): boolean {
+    const k = a < b ? `${a}:${b}` : `${b}:${a}`;
+    if (a === b || this.linked.has(k) || this.startOver.has(k)) return false;
+    const ra = !!ROTORS[this.typeOf.get(a) ?? ""], rb = !!ROTORS[this.typeOf.get(b) ?? ""];
+    // Entre engranajes y ejes manda el tren de transmisión.
+    if (ra && rb) return false;
+    const ga = ra ? a : this.assembly.get(a), gb = rb ? b : this.assembly.get(b);
+    return ga === undefined || ga !== gb;
+  }
+
+  /**
+   * Después de cada paso: la carga que siente cada tren (peso de lo que gira y empujones a otras
+   * piezas) y los choques que lo detienen. Lo mismo para los servos.
+   */
+  private loads(env: SimEnv): void {
+    const g = 9.81;
+    // Cada tanto: los pares que se atravesaban al empezar y ya se separaron vuelven a chocar.
+    if (++this.steps % 12 === 0) {
+      for (const k of this.startOver) {
+        const [a, b] = k.split(":").map(Number);
+        const A = this.bodies.get(a!), B = this.bodies.get(b!);
+        if (!A || !B) continue;
+        let near = Infinity;
+        for (let i = 0; i < A.numColliders(); i++) for (let j = 0; j < B.numColliders(); j++) {
+          const c = A.collider(i).contactCollider(B.collider(j), 0.5 * S);
+          if (c) near = Math.min(near, c.distance);
+        }
+        if (near > 0) this.startOver.delete(k);
+      }
+    }
+    for (const [m, rs] of this.groups) {
+      const st = this.trains.get(m)!;
+      let need = 0, hit = false;
+      for (const r of rs) {
+        const c: Vec3 = [r.c0[0] * S, r.c0[1] * S, r.c0[2] * S];
+        let tau = 0;
+        const torque = (p: { x: number; y: number; z: number }, f: Vec3) => {
+          const d: Vec3 = [p.x - c[0], p.y - c[1], p.z - c[2]];
+          tau += (d[1] * f[2] - d[2] * f[1]) * r.axis[0] + (d[2] * f[0] - d[0] * f[2]) * r.axis[1] + (d[0] * f[1] - d[1] * f[0]) * r.axis[2];
+        };
+        for (const b of [r.body, ...r.attached.map((a) => a.body)]) {
+          // Peso de lo que gira.
+          let mass = 0;
+          for (let i = 0; i < b.numColliders(); i++) mass += b.collider(i).mass();
+          if (mass > 0 && b !== r.body) torque(b.worldCom(), [0, 0, -g * mass]);
+          for (let i = 0; i < b.numColliders(); i++) {
+            const col = b.collider(i);
+            const me = this.partOf.get(col.handle);
+            if (me === undefined) continue;
+            this.world.contactPairsWith(col, (other) => {
+              const them = this.partOf.get(other.handle);
+              if (them === undefined || !this.counts(me, them)) return;
+              const dyn = other.parent()?.isDynamic() ?? false;
+              // Choque en la posición de ahora (los contactos del paso son de la posición anterior).
+              const now = col.contactCollider(other, 0);
+              if (now && now.distance < -HIT) hit = true;
+              this.world.contactPair(col, other, (man, flipped) => {
+                let imp = 0;
+                for (let k = 0; k < man.numContacts(); k++) imp += man.contactImpulse(k);
+                const n = man.numSolverContacts();
+                if (!dyn || imp <= 0 || !n) return;
+                let px = 0, py = 0, pz = 0;
+                for (let k = 0; k < n; k++) { const q = man.solverContactPoint(k); px += q.x; py += q.y; pz += q.z; }
+                const nm = man.normal(), sg = flipped ? 1 : -1;
+                const f = (sg * imp) / STEP;
+                torque({ x: px / n, y: py / n, z: pz / n }, [nm.x * f, nm.y * f, nm.z * f]);
+              });
+            });
+          }
+        }
+        // Par que el motor debe dar por esta pieza: el de la carga, reflejado por la reducción.
+        const ratio = env.ratio?.(r.id) ?? 0;
+        need += (-tau * ratio) / Math.pow(GEAR_EFF, env.stages?.(r.id) ?? 0);
+      }
+      st.tau += (need - st.tau) * 0.2;
+      if (hit && st.w !== 0) {
+        st.blocked = Math.sign(st.w);
+        st.retry = 0;
+        st.w = 0;
+        for (const r of rs) { r.theta = r.prev; r.rate = 0; this.place(r); }
+      }
+    }
+
+    // Servos: si lo que mueven se mete en algo, no avanzan ese paso (mantienen la fuerza).
+    for (const [sid, chain] of this.servoChain) {
+      const stv = this.servos.get(sid), prev = this.servoPrev.get(sid);
+      if (!stv || prev === undefined || prev === stv.cmd) continue;
+      let hit = false;
+      for (const id of chain) {
+        const b = this.bodies.get(id);
+        if (!b || hit) continue;
+        for (let i = 0; i < b.numColliders() && !hit; i++) {
+          const col = b.collider(i);
+          this.world.contactPairsWith(col, (other) => {
+            const them = this.partOf.get(other.handle);
+            if (hit || them === undefined || chain.has(them) || them === sid || !this.counts(id, them)) return;
+            const now = col.contactCollider(other, 0);
+            if (now && now.distance < -HIT) hit = true;
+          });
+        }
+      }
+      if (hit) {
+        stv.cmd = prev;
+        this.servoHit.set(sid, 0.6);
+      }
+    }
+    for (const [sid, t] of this.servoHit) { if (t <= STEP) this.servoHit.delete(sid); else this.servoHit.set(sid, t - STEP); }
+  }
+
+  /** Ángulo real (rad) de cada engranaje, polea o eje desde el inicio. */
+  spins(): Map<number, number> {
+    return new Map(this.rotors.map((r) => [r.id, r.theta]));
   }
 
   /** Enrolla o suelta cada cuerda según el giro de su tambor. */
@@ -464,6 +717,7 @@ export class Sim {
 
   /** Ubica las piezas que cuelgan de servos según sus ángulos (cinemática directa). */
   private kinematics(env: SimEnv): void {
+    this.servoPrev.clear();
     if (!this.kinEdges.length) return;
     const pose = new Map<number, { t: Vec3; q: [number, number, number, number] }>();
     const get = (id: number) => {
@@ -480,6 +734,7 @@ export class Sim {
       if (e.servo) {
         const pr = env.props(e.parent);
         const st = this.servos.get(e.parent) ?? { cmd: 0, limit: 0 };
+        if (!this.servoPrev.has(e.parent)) this.servoPrev.set(e.parent, st.cmd);
         const spec = { amin: num(pr.amin, -90), amax: num(pr.amax, 90), speed: Math.max(1, num(pr.speed, 45)) };
         if (Math.abs(env.voltage(e.parent)) >= 4) {
           st.cmd = servoRamp(spec, st.cmd, num(pr.target, 0), STEP);
@@ -592,6 +847,31 @@ export class Sim {
       d.heavy = Math.abs(i) > 0.7 * d.params.iStall ? d.heavy + dtSinceLast : 0;
     }
     for (const [id, st] of this.servos) motors[id] = { rpm: 0, current: 0, torque: 0, angle: st.cmd };
+    // Motores que mueven trenes de engranajes: velocidad, corriente y par reales con su carga.
+    const hit: number[] = [], weak: number[] = [], hot: number[] = [];
+    for (const [m, st] of this.trains) {
+      const v = voltage(m);
+      if (this.typeOf.get(m) === "dcmotor") {
+        const p = motorParams(typeof env === "function" ? {} : env.props(m));
+        const i = motorCurrent(p, v, st.w);
+        motors[m] = { rpm: toRpm(st.w), current: i, torque: motorTorque(p, v, st.w) };
+        const w0 = noLoadSpeed(p, v);
+        const slow = Math.abs(v) > 0.5 && Math.abs(st.w) < 0.15 * Math.abs(w0);
+        st.stall = slow ? st.stall + dtSinceLast : 0;
+        if (slow && !st.blocked) weak.push(m);
+        if (st.stall > 3) hot.push(m);
+      } else motors[m] = { rpm: toRpm(st.w), current: 0, torque: 0 };
+      if (st.blocked) hit.push(m);
+    }
+    const servoHit = [...this.servoHit.keys()];
+    if (hit.length || servoHit.length) {
+      issues.push({ s: "warn", h: "Motor detenido por un choque", t: `Lo que mueve el motor chocó con otra pieza y no puede seguir, así que se detiene. Invierte el sentido para soltarlo.${hot.length ? " Lleva rato atascado con toda su corriente: en la realidad se calentaría, corta la corriente." : ""}`, ids: [...hit, ...servoHit] });
+      [...hit, ...servoHit].forEach((id) => { flag[id] = "warn"; });
+    }
+    if (weak.length) {
+      issues.push({ s: "warn", h: "Motor sin fuerza suficiente", t: `La carga necesita más fuerza de la que el motor da con este voltaje, así que gira muy lento o se queda quieto. Sube el voltaje, usa un motor con más par o agrega una reducción (un engranaje chico moviendo a uno grande: más lento y más fuerte).${hot.length && !hit.length ? " Lleva rato así: en la realidad se calentaría." : ""}`, ids: weak });
+      weak.forEach((id) => { if (!flag[id]) flag[id] = "warn"; });
+    }
     const capped = [...this.drives.filter((d) => d.limit > 0.3).map((d) => d.motor), ...[...this.servos].filter(([, st]) => st.limit > 0.3).map(([id]) => id)];
     if (capped.length) {
       issues.push({ s: "info", h: "Límite de articulación alcanzado", t: "Un servo llegó a su ángulo mínimo o máximo y no puede seguir. Cambia el ángulo pedido o amplía sus límites en Propiedades.", ids: capped });
@@ -629,7 +909,7 @@ export class Sim {
       issues.push({ s: "warn", h: "Estructura que se derrumba", t: this.fallen.size > 1 ? `${this.fallen.size} piezas cayeron porque nada las sostiene. Apóyalas o únelas con una unión fija o una junta.` : "Una pieza cayó porque nada la sostiene. Apóyala o únela con una unión fija o una junta.", ids: [...this.fallen] });
       this.fallen.forEach((id) => { if (!flag[id]) flag[id] = "warn"; });
     }
-    return { issues, flag, motors, jointAngle, pressed, t: this.t };
+    return { issues, flag, motors, jointAngle, pressed, spin: Object.fromEntries(this.rotors.map((r) => [r.id, toRpm(r.rate)])), t: this.t };
   }
 
   free(): void {

@@ -17,6 +17,9 @@ export interface Train {
   rpm: Record<number, number>;
   /** Relación con el motor que la mueve: RPM de la pieza / RPM del motor. */
   ratio: Record<number, number>;
+  /** Motor que mueve cada pieza, y cuántos engranes o correas hay entre ambos. */
+  source: Record<number, number>;
+  stages: Record<number, number>;
   /** Qué sostiene a cada pieza: "motor", "eje", "engrane", "correa" o nada. */
   link: Record<number, string>;
   meshes: MeshPair[];
@@ -122,6 +125,8 @@ export function solveTrain(project: Project, motorRpm: Record<number, number>): 
   // 3. Propagar velocidades por cada componente conectado.
   const rpm: Record<number, number> = {};
   const ratio: Record<number, number> = {};
+  const source: Record<number, number> = {};
+  const stages: Record<number, number> = {};
   const flag: Record<number, "err" | "warn"> = {};
   const issues: Issue[] = [];
   const roots = [...new Set(rotors.map((r) => find(r.id)))];
@@ -149,6 +154,12 @@ export function solveTrain(project: Project, motorRpm: Record<number, number>): 
     const sources = comp.filter((k) => motorOf.has(k));
     const w = new Map<number, number>();
     let drive = 0;
+    const depth = new Map<number, number>();
+    if (sources.length) {
+      depth.set(sources[0]!, 0);
+      const q = [sources[0]!];
+      while (q.length) { const k = q.shift()!; for (const e of adj.get(k) ?? []) if (!depth.has(e.to)) { depth.set(e.to, depth.get(k)! + 1); q.push(e.to); } }
+    }
     if (sources.length && !jam) {
       const src = sources[0]!, m0 = motorOf.get(src)![0]!;
       drive = motorRpm[m0] ?? 0;
@@ -163,6 +174,13 @@ export function solveTrain(project: Project, motorRpm: Record<number, number>): 
       for (const id of members.get(k) ?? []) {
         rpm[id] = jam ? 0 : (w.get(k) ?? 0);
         if (!jam && sources.length && drive) ratio[id] = w.get(k)! / drive;
+        if (!jam && sources.length) {
+          const m0 = motorOf.get(sources[0]!)![0]!;
+          source[id] = m0;
+          stages[id] = depth.get(k) ?? 0;
+          // La relación no depende del voltaje: se calcula aunque el motor esté apagado.
+          ratio[id] = rel.get(k)! / rel.get(sources[0]!)!;
+        }
         if (jam) { flag[id] = "err"; jammedIds.push(id); }
       }
       for (const m of motorOf.get(k) ?? []) {
@@ -192,7 +210,7 @@ export function solveTrain(project: Project, motorRpm: Record<number, number>): 
   }
   if (idle) issues.push({ s: "info", h: "Sin motor", t: "Hay piezas conectadas entre sí, pero ningún motor las mueve. Monta una de ellas sobre el eje de un motor.", ids: [] });
 
-  return { rpm, ratio, link, meshes, issues, flag, beltOk, axisOf };
+  return { rpm, ratio, source, stages, link, meshes, issues, flag, beltOk, axisOf };
 }
 
 /** Punto del eje más cercano (para ubicar piezas sobre ejes). */

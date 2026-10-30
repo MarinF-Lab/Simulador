@@ -4,22 +4,11 @@ import type { Issue } from "../electrical/circuit";
 import { ROTORS } from "../mechanical/axes";
 import { findItem } from "./catalog";
 import { aligned, holeAt } from "./holes";
-import { extent, type Joint, type Part, type Project, type Vec3 } from "./project";
+import { contactRegion, gapOf, hullsOf, passes } from "./footprint";
+import { type Joint, type Part, type Project, type Vec3 } from "./project";
 
-/** Zona donde dos piezas se tocan (mín. y máx. por eje), o null si están separadas más de 1 mm. */
-function contactBox(a: Part, b: Part): { lo: Vec3; hi: Vec3 } | null {
-  const box = (p: Part) => {
-    const [ex, ey, ez] = extent(p);
-    return [[p.x - ex / 2, p.x + ex / 2], [p.y - ey / 2, p.y + ey / 2], [p.z, p.z + ez]] as const;
-  };
-  const A = box(a), B = box(b), lo: number[] = [], hi: number[] = [];
-  for (let k = 0; k < 3; k++) {
-    lo.push(Math.max(A[k]![0], B[k]![0]));
-    hi.push(Math.min(A[k]![1], B[k]![1]));
-    if (lo[k]! > hi[k]! + 1) return null;
-  }
-  return { lo: lo as Vec3, hi: hi as Vec3 };
-}
+/** Zona donde dos piezas se tocan (con su forma real), o null si están separadas más de 1 mm. */
+const contactBox = contactRegion;
 
 /** Centro de la zona donde dos piezas se tocan, o null si están separadas más de 1 mm. */
 export function contactSpot(a: Part, b: Part): Vec3 | null {
@@ -73,14 +62,12 @@ export function checkStructure(project: Project): StructureCheck {
   broken.forEach((id) => { flag[id] = "warn"; });
 
   // Piezas que se atraviesan (no cuentan las que solo se tocan, ni engranajes y poleas, que van en ejes).
-  const solid = project.parts.filter((p) => !ROTORS[p.type]);
+  const solid = project.parts.filter((p) => !ROTORS[p.type] && p.type !== "text");
+  const hulls = new Map(solid.map((p) => [p.id, hullsOf(p)]));
   const over: [Part, Part][] = [];
   for (let i = 0; i < solid.length; i++) for (let j = i + 1; j < solid.length; j++) {
     const A = solid[i]!, B = solid[j]!;
-    const [ax, ay, az] = extent(A), [bx, by, bz] = extent(B);
-    const ox = (ax + bx) / 2 - Math.abs(A.x - B.x), oy = (ay + by) / 2 - Math.abs(A.y - B.y);
-    const oz = Math.min(A.z + az, B.z + bz) - Math.max(A.z, B.z);
-    if (ox > 1 && oy > 1 && oz > 1) over.push([A, B]);
+    if (!passes(A, B) && gapOf(hulls.get(A.id)!, hulls.get(B.id)!) < -1) over.push([A, B]);
   }
   if (over.length) {
     const [A, B] = over[0]!;

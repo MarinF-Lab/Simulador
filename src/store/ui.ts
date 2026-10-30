@@ -14,6 +14,12 @@ interface UIState {
   showDesc: boolean;
   /** Recuadro "¿Qué es?" abierto en Propiedades. */
   showInfo: boolean;
+  /** Imán al mover piezas: cuadrícula de 10 mm, agujeros y apoyo encima. Apagado, movimiento libre de 1 mm. */
+  magnet: boolean;
+  /** Dónde quedó la ventana del Mando (px desde arriba a la izquierda de la mesa). */
+  remotePos: { x: number; y: number } | null;
+  setRemotePos: (p: { x: number; y: number }) => void;
+  setMagnet: (v: boolean) => void;
   setShowDesc: (v: boolean) => void;
   setShowInfo: (v: boolean) => void;
   setTab: (t: Tab) => void;
@@ -27,6 +33,13 @@ interface UIState {
 function load(key: string, d: boolean): boolean {
   try { const v = localStorage.getItem(key); return v === null ? d : v === "1"; } catch { return d; }
 }
+function loadPos(): { x: number; y: number } | null {
+  try {
+    const v = JSON.parse(localStorage.getItem("kinetic.remotePos") ?? "null") as unknown;
+    if (v && typeof v === "object" && Number.isFinite((v as { x: number }).x) && Number.isFinite((v as { y: number }).y)) return v as { x: number; y: number };
+  } catch { /* sin almacenamiento */ }
+  return null;
+}
 function save(key: string, v: boolean): void {
   try { localStorage.setItem(key, v ? "1" : "0"); } catch { /* sin almacenamiento */ }
 }
@@ -39,6 +52,13 @@ export const useUI = create<UIState>((set) => ({
   collapsed: Object.fromEntries(CATEGORIES.map((c) => [c.id, false])) as Record<CategoryId, boolean>,
   showDesc: load("kinetic.showDesc", false),
   showInfo: load("kinetic.showInfo", true),
+  magnet: load("kinetic.magnet", false),
+  remotePos: loadPos(),
+  setRemotePos: (remotePos) => {
+    try { localStorage.setItem("kinetic.remotePos", JSON.stringify(remotePos)); } catch { /* sin almacenamiento */ }
+    set({ remotePos });
+  },
+  setMagnet: (magnet) => { save("kinetic.magnet", magnet); set({ magnet }); },
   setShowDesc: (showDesc) => { save("kinetic.showDesc", showDesc); set({ showDesc }); },
   setShowInfo: (showInfo) => { save("kinetic.showInfo", showInfo); set({ showInfo }); },
   setTab: (tab) => set({ tab }),

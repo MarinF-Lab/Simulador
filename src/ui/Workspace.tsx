@@ -1,5 +1,5 @@
-import { lazy, Suspense } from "react";
-import { ArrowLeftRight, Box, Check, Hand, Info, Link2, Maximize, Minus, Move, PenTool, Plus, Power, RotateCcw, RotateCw, Spline, Trash2, Undo2, X } from "lucide-react";
+import { lazy, Suspense, useEffect, useRef, type ReactNode } from "react";
+import { ArrowLeftRight, Box, Check, ChevronDown, ChevronUp, Hand, Info, Link2, Magnet, Maximize, Minus, Move, PenTool, Plus, Power, RotateCcw, RotateCw, Spline, Trash2, Undo2, X } from "lucide-react";
 import { POLAR } from "../core/model/terminals";
 import { findItem } from "../core/model/catalog";
 import { overlay, sceneApi } from "../scene/api";
@@ -26,6 +26,36 @@ function Axes() {
         <text data-label="z" x="28" y="7" fill="#5b8def">Z</text>
       </g>
     </svg>
+  );
+}
+
+/** Botón que repite su acción mientras se mantiene presionado (para subir o bajar de a 1 mm). */
+function HoldButton({ onStep, label, children }: { onStep: () => void; label: string; children: ReactNode }) {
+  const timer = useRef<number | null>(null);
+  const step = useRef(onStep);
+  step.current = onStep;
+  const stop = () => { if (timer.current !== null) { clearTimeout(timer.current); timer.current = null; } };
+  useEffect(() => stop, []);
+  const start = () => {
+    stop();
+    step.current();
+    const loop = (ms: number) => { timer.current = window.setTimeout(() => { step.current(); loop(70); }, ms); };
+    loop(380);
+  };
+  return (
+    <button
+      aria-label={label}
+      title={label}
+      onPointerDown={(e) => { e.preventDefault(); start(); }}
+      onPointerUp={stop}
+      onPointerLeave={stop}
+      onPointerCancel={stop}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); step.current(); } }}
+      onContextMenu={(e) => e.preventDefault()}
+      className="grid size-11 touch-none place-items-center rounded-full border border-line bg-panel text-ink shadow-lg select-none"
+    >
+      {children}
+    </button>
   );
 }
 
@@ -64,6 +94,8 @@ export function Workspace() {
   const glue = useProject((s) => s.glueMode);
   const { shapeMode, setShapeMode, selVertex, removeVertex, drawUndo, drawCancel, drawFinish, drawHoles, setDrawHoles } = useProject();
   const drill = useProject((s) => s.drillMode);
+  const nudgeZ = useProject((s) => s.nudgeZ);
+  const { magnet, setMagnet } = useUI();
 
   const jointFirst = useProject((s) => s.jointFirst);
   const jointMsg = useProject((s) => s.jointMsg);
@@ -114,7 +146,7 @@ export function Workspace() {
       : act
         ? `Toca ${act.label} para accionar ${type === "switch" ? "el interruptor" : "el sensor"}. Arrástralo para moverlo o toca un borne para empezar un cable.`
       : item
-        ? `Arrastra ${item.name.toLowerCase()} para moverlo. Toca dos veces o usa ⟳ para girarlo 90°. Toca un borne para empezar un cable.`
+        ? `Arrastra la pieza para moverla: se detiene al tocar otra. ↑↓ cambia su altura y ⟳ la gira 90°.${magnet ? " Imán encendido: cuadrícula de 10 mm y agujeros." : " Enciende el imán para usar la cuadrícula."}`
         : "Mueve la mesa con un dedo. Con dos dedos: pellizca para acercar, gira para orbitar y sube o baja para inclinar.";
 
   return (
@@ -158,6 +190,8 @@ export function Workspace() {
         )}
         {!running && (
           <>
+            <HoldButton label={magnet ? "Subir 10 mm" : "Subir 1 mm"} onStep={() => selected !== null && nudgeZ(selected, 1)}><ChevronUp className="size-5" /></HoldButton>
+            <HoldButton label={magnet ? "Bajar 10 mm" : "Bajar 1 mm"} onStep={() => selected !== null && nudgeZ(selected, -1)}><ChevronDown className="size-5" /></HoldButton>
             <button onClick={() => selected !== null && rotate(selected)} aria-label="Girar 90°" className="grid size-11 place-items-center rounded-full bg-accent text-accent-ink shadow-lg">
               <RotateCw className="size-5" />
             </button>
@@ -247,12 +281,23 @@ export function Workspace() {
         </button>
       )}
 
-      <div role="group" aria-label="Vista" className="absolute top-3 right-3 flex flex-col gap-2">
+      <div role="group" aria-label="Vista" className="absolute top-3 right-3 z-20 flex flex-col gap-2">
         <button className={viewBtn} onClick={() => sceneApi.zoomBy(1.25)} aria-label="Acercar"><Plus className="size-5" /></button>
         <button className={viewBtn} onClick={() => sceneApi.zoomBy(0.8)} aria-label="Alejar"><Minus className="size-5" /></button>
         <button className={viewBtn} onClick={() => sceneApi.fit()} aria-label="Ajustar vista"><Maximize className="size-5" /></button>
         <button className={viewBtn} onClick={() => sceneApi.rotateView(1)} aria-label="Girar vista 90°" title="Girar vista 90°"><RotateCcw className="size-5" /></button>
         <button className={viewBtn} onClick={() => sceneApi.isoView()} aria-label="Vista isométrica" title="Vista isométrica"><Box className="size-5" /></button>
+        {!running && (
+          <button
+            className={viewBtn + (magnet ? " border-accent bg-accent text-accent-ink" : "")}
+            onClick={() => setMagnet(!magnet)}
+            aria-pressed={magnet}
+            aria-label={magnet ? "Imán encendido: cuadrícula de 10 mm y agujeros" : "Imán apagado: movimiento libre de 1 mm"}
+            title={magnet ? "Imán encendido" : "Imán apagado"}
+          >
+            <Magnet className="size-5" />
+          </button>
+        )}
       </div>
 
       {draw && (

@@ -430,11 +430,11 @@ function Model({ type, glow = 0, burned = false, on = true, size, props }: { typ
       const e = size[0] / 2 - 7;
       return (
         <group>
-          <Box s={[2 * e, 14, 6]} m={M.steel} />
-          <Cyl r={7} h={6} p={[-e, 0, 0]} m={M.steel} />
-          <Cyl r={7} h={6} p={[e, 0, 0]} m={M.steel} />
-          <Cyl r={3} h={6.4} p={[-e, 0, -0.2]} m={M.hole} seg={12} />
-          <Cyl r={3} h={6.4} p={[e, 0, -0.2]} m={M.hole} seg={12} />
+          <Box s={[2 * e, 14, size[2]]} m={M.steel} />
+          <Cyl r={7} h={size[2]} p={[-e, 0, 0]} m={M.steel} />
+          <Cyl r={7} h={size[2]} p={[e, 0, 0]} m={M.steel} />
+          <Cyl r={3} h={size[2] + 0.4} p={[-e, 0, -0.2]} m={M.hole} seg={12} />
+          <Cyl r={3} h={size[2] + 0.4} p={[e, 0, -0.2]} m={M.hole} seg={12} />
         </group>
       );
     }
@@ -453,16 +453,16 @@ function Model({ type, glow = 0, burned = false, on = true, size, props }: { typ
       const len = size[0];
       return (
         <group>
-          <Box s={[len, 10, 10]} m={M.steel} />
-          <Holes len={len} z={10} />
+          <Box s={[len, 10, size[2]]} m={M.steel} />
+          <Holes len={len} z={size[2]} />
         </group>
       );
     }
     case "plate":
       return (
         <group>
-          <Box s={[size[0], size[1], 6]} m={M.dark} />
-          <Holes len={size[0]} rows={plateRows(size[1])} z={6} every={20} />
+          <Box s={[size[0], size[1], size[2]]} m={M.dark} />
+          <Holes len={size[0]} rows={plateRows(size[1])} z={size[2]} every={20} />
         </group>
       );
     case "bolt":

@@ -204,3 +204,102 @@ describe("piezas lisas y perforables", async () => {
     expect(hole.p.slice(0, 2)).toEqual([10, 0]);
   });
 });
+
+describe("colocación sin imán", async () => {
+  const { useUI } = await import("./ui");
+  const sq = (id: number, x: number, y: number, z = 0, h = 6) => ({ id, type: "custom", x, y, z, rot: [0, 0, 0] as [number, number, number], props: { shape: "-20,-20;20,-20;20,20;-20,20", h, holes: "Sin agujeros" } });
+
+  it("arrastrar no atraviesa: queda pegada a la otra pieza, y se mueve de a 1 mm", () => {
+    useUI.getState().setMagnet(false);
+    const st = useProject.getState();
+    st.load({ parts: [sq(1, 0, 0), sq(2, -100, 3)], cables: [], belts: [], joints: [], nextId: 3 });
+    st.beginDrag(2);
+    useProject.getState().moveLive(2, -73, 3);
+    expect(useProject.getState().project.parts[1]!.x).toBe(-73);
+    useProject.getState().moveLive(2, 30, 3);
+    const p = useProject.getState().project.parts[1]!;
+    expect(p.x).toBeGreaterThan(-40.5);
+    expect(p.x).toBeLessThanOrEqual(-39.8);
+    useProject.getState().endDrag(2, { x: -100, y: 3 });
+    expect(useProject.getState().structure.issues.some((i) => i.h === "Piezas superpuestas")).toBe(false);
+  });
+
+  it("una pieza pasa bajo otra elevada y al soltar sobre una pieza baja cae encima de ella", () => {
+    const st = useProject.getState();
+    st.load({ parts: [sq(1, 0, 0, 30), sq(2, -100, 0), sq(3, 100, 0, 0, 10)], cables: [], belts: [], joints: [], nextId: 4 });
+    st.beginDrag(2);
+    useProject.getState().moveLive(2, 0, 0);
+    useProject.getState().endDrag(2, { x: -100, y: 0 });
+    expect(useProject.getState().project.parts[1]).toMatchObject({ x: 0, y: 0, z: 0 });
+    // Subirla con ↑ la detiene bajo la pieza de arriba (30 mm − 6 de alto = 24).
+    for (let i = 0; i < 40; i++) useProject.getState().nudgeZ(2, 1);
+    expect(useProject.getState().project.parts[1]!.z).toBeCloseTo(24, 0);
+    // Una pieza en el aire, arrastrada sobre otra baja, se apoya encima al soltar.
+    const s2 = useProject.getState();
+    s2.load({ parts: [sq(2, -100, 0, 20), sq(3, 100, 0, 0, 10)], cables: [], belts: [], joints: [], nextId: 4 });
+    s2.beginDrag(2);
+    useProject.getState().moveLive(2, 100, 0);
+    useProject.getState().endDrag(2, { x: -100, y: 0 });
+    expect(useProject.getState().project.parts[0]).toMatchObject({ x: 100, z: 10 });
+  });
+
+  it("con imán vuelve la cuadrícula de 10 mm", () => {
+    useUI.getState().setMagnet(true);
+    const st = useProject.getState();
+    st.load({ parts: [sq(2, -100, 0)], cables: [], belts: [], joints: [], nextId: 3 });
+    st.beginDrag(2);
+    useProject.getState().moveLive(2, -73, 4);
+    expect(useProject.getState().project.parts[0]).toMatchObject({ x: -70, y: 0 });
+    useProject.getState().endDrag(2, { x: -100, y: 0 });
+    useUI.getState().setMagnet(false);
+  });
+});
+
+describe("altura editable", async () => {
+  const { sizeOf } = await import("../core/model/project");
+  const { holesOf } = await import("../core/model/holes");
+
+  it("el alto de una placa cambia de a 1 mm, mueve sus agujeros y se deshace", () => {
+    const st = useProject.getState();
+    st.load({ parts: [{ id: 1, type: "plate", x: 0, y: 0, z: 0, rot: [0, 0, 0], props: {} }], cables: [], belts: [], joints: [], nextId: 2 });
+    useProject.getState().setSize(1, "lz", 20.4);
+    const p = useProject.getState().project.parts[0]!;
+    expect(sizeOf(p.type, p.props)[2]).toBe(20);
+    const zs = new Set(holesOf(p).map((h) => h.p[2]));
+    expect([...zs].sort((a, b) => a - b)).toEqual([0, 20]);
+    useProject.getState().undo();
+    const q = useProject.getState().project.parts[0]!;
+    expect(sizeOf(q.type, q.props)[2]).toBe(6);
+  });
+
+  it("escribir la altura la lleva ahí, o se detiene al tocar otra pieza", () => {
+    const sq = (id: number, z: number) => ({ id, type: "custom", x: 0, y: 0, z, rot: [0, 0, 0] as [number, number, number], props: { shape: "-20,-20;20,-20;20,20;-20,20", h: 6, holes: "Sin agujeros" } });
+    const st = useProject.getState();
+    st.load({ parts: [sq(1, 0), sq(2, 30)], cables: [], belts: [], joints: [], nextId: 3 });
+    expect(useProject.getState().moveZTo(1, 15)).toBe(15);
+    expect(useProject.getState().moveZTo(1, 100)).toBeCloseTo(24, 0);
+    expect(useProject.getState().project.parts[0]!.z).toBeCloseTo(24, 0);
+  });
+});
+
+describe("Mando de mantener apretado", async () => {
+  const { EXAMPLES } = await import("../core/persistence/examples");
+  const { channelId } = await import("../core/electrical/controller");
+  it("mantener un botón cambia el circuito sin tocar el historial, y al soltar vuelve", () => {
+    const st = useProject.getState();
+    st.load(EXAMPLES.find((e) => e.id === "controller")!.build());
+    const board = useProject.getState().project.parts.find((p) => p.type === "controller")!;
+    const out = () => useProject.getState().circuit.readings[channelId(board.id, 1)]?.v ?? 0;
+    const before = out();
+    const hist = useProject.getState().history;
+    useProject.getState().setHeld(board.id, 1, "Adelante");
+    const on = out();
+    useProject.getState().setHeld(board.id, 1, "Atrás");
+    const back = out();
+    useProject.getState().setHeld(board.id, 1, null);
+    expect(useProject.getState().history).toBe(hist);
+    expect(Math.abs(on)).toBeGreaterThan(1);
+    expect(Math.sign(back)).toBe(-Math.sign(on));
+    expect(out()).toBeCloseTo(before, 5);
+  });
+});

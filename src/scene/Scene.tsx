@@ -88,6 +88,8 @@ function Spinner({ id, axis, children }: { id: number; axis: "x" | "z"; children
     const g = ref.current;
     if (!g) return;
     if (!running) { g.rotation.set(0, 0, 0); return; }
+    const real = simPoses.spin.get(id);
+    if (real !== undefined) { g.rotation[axis] = real; return; }
     if (reducedMotion) return;
     g.rotation[axis] += (rpm / 60) * Math.PI * 2 * Math.min(dt, 0.05);
   });

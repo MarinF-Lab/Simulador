@@ -281,3 +281,25 @@ describe("altura editable", async () => {
     expect(useProject.getState().project.parts[0]!.z).toBeCloseTo(24, 0);
   });
 });
+
+describe("Mando de mantener apretado", async () => {
+  const { EXAMPLES } = await import("../core/persistence/examples");
+  const { channelId } = await import("../core/electrical/controller");
+  it("mantener un botón cambia el circuito sin tocar el historial, y al soltar vuelve", () => {
+    const st = useProject.getState();
+    st.load(EXAMPLES.find((e) => e.id === "controller")!.build());
+    const board = useProject.getState().project.parts.find((p) => p.type === "controller")!;
+    const out = () => useProject.getState().circuit.readings[channelId(board.id, 1)]?.v ?? 0;
+    const before = out();
+    const hist = useProject.getState().history;
+    useProject.getState().setHeld(board.id, 1, "Adelante");
+    const on = out();
+    useProject.getState().setHeld(board.id, 1, "Atrás");
+    const back = out();
+    useProject.getState().setHeld(board.id, 1, null);
+    expect(useProject.getState().history).toBe(hist);
+    expect(Math.abs(on)).toBeGreaterThan(1);
+    expect(Math.sign(back)).toBe(-Math.sign(on));
+    expect(out()).toBeCloseTo(before, 5);
+  });
+});

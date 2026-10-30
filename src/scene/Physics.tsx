@@ -55,9 +55,15 @@ export function PhysicsRunner() {
       sim.current = null;
       simPoses.map = new Map();
       simPoses.ext = new Map();
+      simPoses.spin = new Map();
       simPoses.follow.clear();
       useSim.setState({ status: null, loading: false });
       useProject.getState().setPressed({});
+      // Los botones del Mando que quedaron apretados se sueltan al detener.
+      for (const key of Object.keys(useProject.getState().held)) {
+        const [id, k] = key.split(":").map(Number);
+        useProject.getState().setHeld(id!, k!, null);
+      }
       invalidate();
     };
   }, [invalidate]);
@@ -68,8 +74,9 @@ export function PhysicsRunner() {
     const st = useProject.getState();
     const volt = (id: number) => useProject.getState().circuit.readings[id]?.v ?? 0;
     const props = (id: number) => st.project.parts.find((p) => p.id === id)?.props ?? {};
-    s.step(dt, { voltage: volt, props, rpm: (id) => st.mech.rpm[id] ?? 0 });
+    s.step(dt, { voltage: volt, props, rpm: (id) => st.mech.rpm[id] ?? 0, source: (id) => st.mech.source[id], ratio: (id) => st.mech.ratio[id] ?? 0, stages: (id) => st.mech.stages[id] ?? 0 });
     simPoses.map = s.poses();
+    simPoses.spin = s.spins();
     simPoses.ext = s.extensions();
     since.current += dt;
     sinceRec.current += dt;
@@ -83,7 +90,7 @@ export function PhysicsRunner() {
         const r = ps.circuit.readings[p.id];
         if (r) { values[`${p.id}:v`] = r.v; values[`${p.id}:i`] = r.i; }
         const m = status?.motors[p.id];
-        const w = m && m.rpm !== 0 ? m.rpm : ps.mech.rpm[p.id];
+        const w = status?.spin[p.id] ?? (m && (m.rpm !== 0 || p.type === "dcmotor") ? m.rpm : ps.mech.rpm[p.id]);
         if (w !== undefined && (m || Math.abs(w) > 0 || p.type === "dcmotor" || p.type.startsWith("gear") || p.type.startsWith("pulley"))) values[`${p.id}:rpm`] = w;
         if (m && p.type === "dcmotor") { values[`${p.id}:torque`] = m.torque; values[`${p.id}:i`] = m.current; }
         if (m?.angle !== undefined) values[`${p.id}:angle`] = m.angle;

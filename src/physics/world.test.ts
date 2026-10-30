@@ -340,3 +340,126 @@ describe("piezas sobre engranajes y poleas", () => {
     sim.free();
   });
 });
+
+describe("el motor se detiene si no puede mover la carga", () => {
+  const train = async (project: Project) => {
+    const { solveTrain } = await import("../core/mechanical/train");
+    const motors = Object.fromEntries(project.parts.filter((p) => p.type === "dcmotor").map((p) => [p.id, 60]));
+    return solveTrain(project, motors);
+  };
+  const envOf = (project: Project, t: Awaited<ReturnType<typeof train>>, v: () => number) => ({
+    voltage: (id: number) => (project.parts.find((p) => p.id === id)?.type === "dcmotor" ? v() : 0),
+    props: (id: number) => project.parts.find((p) => p.id === id)?.props ?? {},
+    rpm: (id: number) => t.rpm[id] ?? 0,
+    source: (id: number) => t.source[id],
+    ratio: (id: number) => t.ratio[id] ?? 0,
+    stages: (id: number) => t.stages[id] ?? 0,
+  });
+  const arm = (id: number, gx: number, gz: number): Part => ({ id, type: "custom", x: gx, y: 25, z: gz, rot: [0, 0, 0], props: { shape: "-5,-20;5,-20;5,20;-5,20", h: 4, holes: "Sin agujeros" } });
+
+  it("dos garras pegadas a engranajes se detienen al juntarse y se sueltan al invertir", async () => {
+    const plate = P(1, "plate", 40, 0, 0, [0, 0, 0], { lx: 240, ly: 200 });
+    const motor = P(2, "dcmotor", 0, 0, 6, [0, 3, 0], { rpm: 60, vnom: 6, torque: 0.8 });
+    const g1 = P(4, "gear40", 0, 0, 57), g2 = P(5, "gear40", 80, 0, 57);
+    // Brazos de 40 mm que salen hacia +Y desde 5 mm del centro: al girar se cruzan entre los ejes.
+    const a1 = arm(6, 0, 65), a2 = arm(7, 80, 65);
+    const project: Project = {
+      parts: [plate, motor, g1, g2, a1, a2], cables: [], nextId: 20,
+      joints: [{ id: 8, kind: "glue", a: { part: 6, h: -1 }, b: { part: 4, h: -1 } }, { id: 9, kind: "glue", a: { part: 7, h: -1 }, b: { part: 5, h: -1 } }],
+    };
+    const t = await train(project);
+    expect(t.source[4]).toBe(2);
+    expect(t.ratio[5]).toBeCloseTo(-1);
+    let v = 6;
+    const env = envOf(project, t, () => v);
+    const sim = new Sim(project);
+    // Rectángulos reales de los brazos (10 × 40 mm) y su separación con ejes separadores.
+    const rects = () => {
+      const s = sim.spins();
+      return [[0, s.get(4)!], [80, s.get(5)!]].map(([cx, th]) => [[-5, 5], [5, 5], [5, 45], [-5, 45]].map(([x, y]) => [cx! + x! * Math.cos(th!) - y! * Math.sin(th!), x! * Math.sin(th!) + y! * Math.cos(th!)]));
+    };
+    const sep = (a: number[][], b: number[][]) => {
+      let best = -Infinity;
+      for (const poly of [a, b]) for (let i = 0; i < 4; i++) {
+        const [x0, y0] = poly[i]!, [x1, y1] = poly[(i + 1) % 4]!, l = Math.hypot(x1! - x0!, y1! - y0!);
+        const n = [(y1! - y0!) / l, -(x1! - x0!) / l];
+        const pa = a.map((p) => p[0]! * n[0]! + p[1]! * n[1]!), pb = b.map((p) => p[0]! * n[0]! + p[1]! * n[1]!);
+        best = Math.max(best, Math.min(...pb) - Math.max(...pa), Math.min(...pa) - Math.max(...pb));
+      }
+      return best;
+    };
+    let minD = Infinity;
+    for (let i = 0; i < 150; i++) { sim.step(1 / 60, env); const [r1, r2] = rects(); minD = Math.min(minD, sep(r1!, r2!)); }
+    // Nunca se atraviesan (se meten menos de 1,5 mm).
+    expect(minD).toBeGreaterThan(-1.5);
+    const st = sim.status(env, 0.3);
+    expect(st.issues.map((i) => i.h)).toContain("Motor detenido por un choque");
+    expect(Math.abs(st.motors[2]!.rpm)).toBeLessThan(5);
+    const th = sim.spins().get(4)!;
+    // Al invertir, vuelve a girar en el otro sentido.
+    v = -6;
+    for (let i = 0; i < 30; i++) sim.step(1 / 60, env);
+    expect(Math.abs(sim.spins().get(4)! - th)).toBeGreaterThan(0.5);
+    sim.free();
+  });
+
+  it("una garra que gira libre sigue girando", async () => {
+    const plate = P(1, "plate", 0, 0, 0, [0, 0, 0], { lx: 200, ly: 200 });
+    const motor = P(2, "dcmotor", 0, 0, 6, [0, 3, 0], { rpm: 60, vnom: 6, torque: 0.8 });
+    const g1 = P(4, "gear40", 0, 0, 57);
+    const project: Project = { parts: [plate, motor, g1, arm(6, 0, 65)], cables: [], nextId: 20, joints: [{ id: 8, kind: "glue", a: { part: 6, h: -1 }, b: { part: 4, h: -1 } }] };
+    const t = await train(project);
+    const env = envOf(project, t, () => 6);
+    const sim = new Sim(project);
+    for (let i = 0; i < 60; i++) sim.step(1 / 60, env);
+    // 60 RPM: una vuelta por segundo.
+    expect(Math.abs(sim.spins().get(4)!)).toBeGreaterThan(1.6 * Math.PI);
+    expect(sim.status(env, 0.3).issues.map((i) => i.h)).not.toContain("Motor detenido por un choque");
+    sim.free();
+  });
+
+  it("levantar un brazo pesado depende del voltaje y de la reducción", async () => {
+    const { snapRotor } = await import("../core/mechanical/snap");
+    // Motor de eje horizontal (+X) sobre una placa elevada y anclada.
+    const build = (reduce: boolean): Project => {
+      const plate = P(1, "plate", 0, 0, 134, [0, 0, 0], { lx: 60, ly: 60 });
+      const motor = P(2, "dcmotor", 0, 0, 140, [0, 0, 0], { rpm: 60, vnom: 6, torque: 0.02 });
+      const base: Project = { parts: [plate, motor], cables: [], nextId: 20 };
+      const small = P(3, reduce ? "gear10" : "gear40", 0, 0, 0);
+      const s1 = snapRotor(base, small, 25, 0)!;
+      const g1 = { ...small, ...s1 };
+      base.parts.push(g1);
+      let big = g1;
+      if (reduce) {
+        // Engranaje de 40 engranando arriba del de 10: 4 veces más lento y fuerte.
+        big = { ...P(4, "gear40", 0, 0, 0), x: g1.x, y: g1.y, z: g1.z + extent(g1)[2] / 2 + 50 - 42, rot: g1.rot };
+        base.parts.push(big);
+      }
+      const cz = big.z + extent(big)[2] / 2;
+      // Barra de aluminio de 100 × 10 × 20 mm pegada a la cara del engranaje, horizontal.
+      const bar: Part = { id: 9, type: "custom", x: big.x + 4 + 10, y: 60, z: cz - 5, rot: [0, 1, 0], props: { shape: "-5,-50;5,-50;5,50;-5,50", h: 20, holes: "Sin agujeros", color: "Aluminio" } };
+      base.parts.push(bar);
+      return { ...base, joints: [{ id: 10, kind: "glue", a: { part: 9, h: -1 }, b: { part: big.id, h: -1 } }] };
+    };
+    const turn = async (project: Project, v: number, seconds: number) => {
+      const t = await train(project);
+      const env = envOf(project, t, () => v);
+      const sim = new Sim(project);
+      const id = project.parts.find((p) => p.id === 4) ? 4 : 3;
+      for (let i = 0; i < seconds * 60; i++) sim.step(1 / 60, env);
+      const out = { angle: Math.abs(sim.spins().get(id)!), issues: sim.status(env, 0.3).issues.map((i) => i.h) };
+      sim.free();
+      return out;
+    };
+    // Directo, a 6 V: no puede dar la vuelta con la barra.
+    const weak = await turn(build(false), 6, 3);
+    expect(weak.angle).toBeLessThan(2 * Math.PI);
+    expect(weak.issues).toContain("Motor sin fuerza suficiente");
+    // Con el doble de voltaje tiene el doble de fuerza: da más de una vuelta.
+    const strong = await turn(build(false), 12, 3);
+    expect(strong.angle).toBeGreaterThan(2 * Math.PI);
+    // Con reducción 10 → 40, a 6 V, la mueve (más lento).
+    const geared = await turn(build(true), 6, 6);
+    expect(geared.angle).toBeGreaterThan(1.2 * Math.PI);
+  });
+});

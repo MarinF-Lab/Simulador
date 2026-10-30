@@ -8,7 +8,10 @@ export const simPoses: {
   start: Map<number, [number, number, number]>;
   /** Salida del vástago de cada actuador lineal (mm). */
   ext: Map<number, number>;
+  /** Ángulo real (rad) de cada engranaje, polea o eje: se detiene si su motor choca. */
+  spin: Map<number, number>;
 } = {
+  spin: new Map(),
   ext: new Map(),
   map: new Map(),
   follow: new Map(),

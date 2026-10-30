@@ -37,10 +37,25 @@ function recentered(p: Part, pts: Pt[]): { x: number; y: number; z: number; prop
   return { x: r(p.x + d[0]), y: r(p.y + d[1]), z: r(p.z + ez0 / 2 + d[2] - ez1 / 2), props: { shape, drill } };
 }
 
-/** Proyecto con los sensores que la simulación está presionando. */
-function withPressed(p: Project, pressed: Record<number, boolean>): Project {
-  if (!Object.values(pressed).some(Boolean)) return p;
-  return { ...p, parts: p.parts.map((x) => (pressed[x.id] ? { ...x, props: { ...x.props, pressed: true } } : x)) };
+/**
+ * Proyecto con lo que pasa en vivo: los sensores que la simulación está presionando y los
+ * botones del Mando que se mantienen apretados ("pieza:canal" → modo).
+ */
+function withPressed(p: Project, pressed: Record<number, boolean>, held: Record<string, string> = {}): Project {
+  const keys = Object.keys(held);
+  if (!Object.values(pressed).some(Boolean) && !keys.length) return p;
+  return {
+    ...p,
+    parts: p.parts.map((x) => {
+      let props = x.props;
+      if (pressed[x.id]) props = { ...props, pressed: true };
+      for (const k of keys) {
+        const [id, ch] = k.split(":").map(Number);
+        if (id === x.id) props = { ...props, [`m${ch! + 1}`]: held[k]! };
+      }
+      return props === x.props ? x : { ...x, props };
+    }),
+  };
 }
 
 /** RPM de cada motor según el voltaje que recibe: RPM nominal × V / V nominal. */
@@ -124,6 +139,9 @@ interface ProjectState {
   setSize: (id: number, key: "lx" | "ly" | "lz", mm: number) => void;
   /** Sensores presionados por la simulación: cambian el circuito, no el diseño ni el historial. */
   pressed: Record<number, boolean>;
+  /** Botones del Mando mantenidos ("pieza:canal" → modo): cambian el circuito mientras se apretan. */
+  held: Record<string, string>;
+  setHeld: (part: number, k: number, mode: string | null) => void;
   setPressed: (p: Record<number, boolean>) => void;
   remove: (id: number) => void;
   /** Toque en un borne: el primero queda pendiente, el segundo crea el cable. */
@@ -242,7 +260,7 @@ export const useProject = create<ProjectState>((set, get) => {
     },
     dismissJoint: () => set({ jointOffer: null }),
     load: (project) =>
-      set({ project, history: emptyHistory(), selected: null, dragging: null, dragFrom: null, pending: null, jointOffer: null, jointTool: null, beltMode: null, pressed: {}, drawMode: null, glueMode: null, selVertex: null, shapeFrom: null, jointFirst: null, jointMsg: null, drillMode: null }),
+      set({ project, history: emptyHistory(), selected: null, dragging: null, dragFrom: null, pending: null, jointOffer: null, jointTool: null, beltMode: null, pressed: {}, held: {}, drawMode: null, glueMode: null, selVertex: null, shapeFrom: null, jointFirst: null, jointMsg: null, drillMode: null }),
     jointFirst: null,
     jointMsg: null,
     jointTap: (id, at) => {
@@ -508,13 +526,25 @@ export const useProject = create<ProjectState>((set, get) => {
     setProp: (id, key, v) => commit(updateCmd(get().project, id, { props: { [key]: v } } as Patch, `${id}:${key}`)),
     replace: (id) => commit(updateCmd(get().project, id, { props: { burned: undefined, burnV: undefined } })),
     pressed: {},
+    held: {},
+    setHeld: (id, k, mode) => {
+      const key = `${id}:${k}`;
+      const cur = get().held;
+      if ((cur[key] ?? null) === mode) return;
+      const held = { ...cur };
+      if (mode === null) delete held[key]; else held[key] = mode;
+      set({ held });
+      const s = get();
+      const c = analyze(withPressed(s.project, s.pressed, held));
+      set({ circuit: c, mech: solveTrain(s.project, motorSpeeds(s.project, c)) });
+    },
     setPressed: (p) => {
       const cur = get().pressed;
       const same = Object.keys(p).length === Object.keys(cur).length && Object.entries(p).every(([k, v]) => cur[+k] === v);
       if (same) return;
       set({ pressed: p });
       const s = get();
-      const c = analyze(withPressed(s.project, p));
+      const c = analyze(withPressed(s.project, p, s.held));
       set({ circuit: c, mech: solveTrain(s.project, motorSpeeds(s.project, c)) });
     },
     setSize: (id, key, mm) => {
@@ -770,7 +800,7 @@ export const useProject = create<ProjectState>((set, get) => {
 // en la pieza (fuera del historial, como pasaría en la realidad) y se vuelve a calcular.
 useProject.subscribe((s, prev) => {
   if (s.project === prev.project) return;
-  const c = analyze(withPressed(s.project, s.pressed));
+  const c = analyze(withPressed(s.project, s.pressed, s.held));
   if (c.burns.length) {
     const burnt = new Map(c.burns.map((b) => [b.id, b.v]));
     useProject.setState({
